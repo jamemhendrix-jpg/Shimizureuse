@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#2a78d6">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" type="image/png" href="icon-192.png">
 <title>100億コンパス — 目標達成トラッカー</title>
 <style>
   :root {
@@ -75,6 +79,23 @@
   .mini-asset { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; margin-bottom: 10px; }
   .mini-asset .ma-value { font-size: 26px; font-weight: 700; }
   .mini-asset .ma-goal { font-size: 13px; color: var(--text-secondary); }
+  .today-goals { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .tg-chip {
+    font-size: 12.5px; padding: 4px 12px; border-radius: 999px;
+    background: var(--accent-wash); color: var(--text-secondary);
+  }
+  .tg-chip strong { color: var(--text-primary); }
+
+  /* ---- ガレージ ---- */
+  .car-row { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; margin-top: 10px; }
+  .car-row .c-name { font-weight: 600; }
+  .car-row .c-pct { color: var(--text-secondary); }
+  .car-row .c-pct .done { color: var(--good); font-weight: 600; }
+  .meter.small { height: 6px; margin-top: 3px; }
+  .garage-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+  .garage-row .g-name { flex: 2; min-width: 150px; }
+  .garage-row .g-price { flex: 1; min-width: 110px; }
+  .garage-row .g-pct { font-size: 12.5px; color: var(--text-secondary); min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
 
   .card {
     background: var(--surface-1);
@@ -234,7 +255,12 @@
     <section class="card">
       <div class="today-date" id="today-date"></div>
       <div class="today-msg" id="today-msg"></div>
+      <div class="today-goals" id="today-goals" aria-label="目標"></div>
       <div class="open-streak">🔥 開いた記録 <strong id="open-streak-n">1</strong>日連続 — 開くだけで前進</div>
+      <div style="margin-top:12px">
+        <button class="ghost" type="button" id="reminder-btn">🔔 毎日リマインドを設定</button>
+        <div class="parse-hint" id="reminder-status"></div>
+      </div>
     </section>
 
     <!-- 今日の行動 -->
@@ -287,10 +313,10 @@
     </div>
     <div class="goal">
       <div class="g-label">GOAL 3 — 愛車</div>
-      <div class="g-title" id="g3-title">好きな車</div>
-      <div class="meter" role="progressbar" aria-label="愛車購入への進捗"><span id="g3-bar"></span></div>
-      <div class="g-pct" id="g3-pct">—</div>
-      <div class="g-detail" id="g3-detail">下の設定で車種と価格を登録できます。</div>
+      <div class="g-title">好きな車たち</div>
+      <div id="g3-body">
+        <div class="g-detail">下の「ガレージ」で車を登録できます。</div>
+      </div>
     </div>
   </section>
 
@@ -347,15 +373,15 @@
 
   <!-- 逆算シミュレーター -->
   <section class="card">
-    <h2>逆算シミュレーター<span class="sub">複利で100億到達までを逆算</span></h2>
+    <h2>逆算シミュレーター<span class="sub">100万円までは貯蓄、そこからは複利</span></h2>
     <div class="sim-grid">
       <div class="sim-inputs">
         <div class="field">
-          <label for="sim-monthly">毎月の追加投資額</label>
-          <input type="text" id="sim-monthly" placeholder="例: 30万" autocomplete="off">
+          <label for="sim-monthly">毎月の積立額</label>
+          <input type="text" id="sim-monthly" placeholder="例: 3万" autocomplete="off">
         </div>
         <div class="field">
-          <label for="sim-rate">想定年利(%)</label>
+          <label for="sim-rate">想定年利(%・100万円到達後から適用)</label>
           <input type="number" id="sim-rate" min="0" max="200" step="0.5" value="7">
         </div>
         <div class="field">
@@ -369,6 +395,17 @@
     </div>
   </section>
 
+  <!-- ガレージ -->
+  <section class="card">
+    <h2>ガレージ — 好きな車<span class="sub">価格はいつでも更新OK。最新の入力価格で達成率を計算します</span></h2>
+    <div id="garage"></div>
+    <form id="car-form" class="habit-add" style="margin-bottom:0">
+      <input type="text" id="car-name-input" placeholder="車名(例: GT-R NISMO)" autocomplete="off" required>
+      <input type="text" id="car-price-input" placeholder="価格(例: 3000万)" autocomplete="off" required style="flex:0 1 160px;min-width:120px">
+      <button type="submit" class="primary">追加</button>
+    </form>
+  </section>
+
   <!-- 設定 -->
   <section class="card">
     <h2>設定とデータ</h2>
@@ -376,14 +413,6 @@
       <div class="field">
         <label for="set-living">月の生活費(自由な生活の判定に使用)</label>
         <input type="text" id="set-living" placeholder="例: 30万" autocomplete="off">
-      </div>
-      <div class="field">
-        <label for="set-car-name">好きな車</label>
-        <input type="text" id="set-car-name" placeholder="例: フェラーリ SF90" autocomplete="off">
-      </div>
-      <div class="field">
-        <label for="set-car-price">車の価格</label>
-        <input type="text" id="set-car-price" placeholder="例: 6000万" autocomplete="off">
       </div>
     </div>
     <div class="data-actions">
@@ -403,7 +432,8 @@
    100億コンパス — 状態管理
    ============================================================ */
 const STORE_KEY = "hyakuoku-compass:v1";
-const GOAL = 1e10; // 100億円
+const GOAL = 1e10;         // 100億円
+const INVEST_START = 1e6;  // 100万円 — ここまでは貯蓄フェーズ(利回りを適用しない)
 const MILESTONES = [
   { v: 1e6,  label: "100万" },
   { v: 1e7,  label: "1,000万" },
@@ -419,19 +449,33 @@ const defaultState = () => ({
   records: [],                    // { d: "YYYY-MM-DD", v: number }
   habits: [],                     // { id, name, done: { "YYYY-MM-DD": true } }
   opens: {},                      // { "YYYY-MM-DD": true } アプリを開いた日
-  sim: { monthly: 300000, rate: 7, targetYears: 20 },
-  car: { name: "", price: 0 },
+  sim: { monthly: 30000, rate: 7, targetYears: 20 },
+  cars: [],                       // { id, name, price } 好きな車は何台でも
   living: { monthly: 0 },
+  reminder: { enabled: false },
 });
 
 let state = loadState();
 
+function migrateState(parsed) {
+  const s = Object.assign(defaultState(), parsed);
+  // 旧形式 car:{name,price} → cars:[]
+  if (!Array.isArray(s.cars)) s.cars = [];
+  if (parsed && parsed.car && (parsed.car.name || parsed.car.price) && !s.cars.length) {
+    s.cars.push({ id: "car-migrated", name: parsed.car.name || "好きな車", price: parsed.car.price || 0 });
+  }
+  delete s.car;
+  return s;
+}
 function loadState() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (!raw) return defaultState();
-    const parsed = JSON.parse(raw);
-    return Object.assign(defaultState(), parsed);
+    if (!raw) {
+      const s = defaultState();
+      s.records.push({ d: todayStr(), v: 100000 }); // 初期値: 現在資産10万円
+      return s;
+    }
+    return migrateState(JSON.parse(raw));
   } catch (e) {
     console.warn("状態の読み込みに失敗しました", e);
     return defaultState();
@@ -533,6 +577,30 @@ function renderToday() {
   $("today-msg").textContent = MESSAGES[dayIdx % MESSAGES.length];
   $("open-streak-n").textContent = openStreak();
 
+  // 目標を常に見える場所に(忘れさせない)
+  const strip = $("today-goals");
+  strip.innerHTML = "";
+  const recNow = latestRecord();
+  const chip = text => {
+    const c = document.createElement("span");
+    c.className = "tg-chip";
+    c.textContent = text;
+    strip.appendChild(c);
+  };
+  if (recNow) {
+    const pct = recNow.v / GOAL * 100;
+    chip(`💰 100億円 — ${pct >= 1 ? pct.toFixed(2) : pct.toFixed(4)}%`);
+  } else {
+    chip("💰 100億円");
+  }
+  chip("🕊 自由な生活");
+  if (state.cars.length) {
+    const names = state.cars.map(c => c.name);
+    chip(`🚗 ${names.slice(0, 2).join(" / ")}${names.length > 2 ? ` +${names.length - 2}台` : ""}`);
+  } else {
+    chip("🚗 好きな車");
+  }
+
   // 資産スナップショット
   const rec = latestRecord();
   if (rec) {
@@ -601,7 +669,8 @@ function projectMonths(principal, monthly, annualRate, target, capYears = 80) {
   let a = principal;
   const capM = capYears * 12;
   for (let m = 1; m <= capM; m++) {
-    a = a * (1 + r) + monthly;
+    // 100万円までは貯蓄フェーズ: 利回りを適用しない
+    a = (a >= INVEST_START ? a * (1 + r) : a) + monthly;
     pts.push(a);
     if (a >= target) break;
   }
@@ -619,7 +688,7 @@ function requiredRate(principal, monthly, targetYears, target) {
   const reach = rate => {
     const r = rate / 100 / 12;
     let a = principal;
-    for (let m = 0; m < months; m++) a = a * (1 + r) + monthly;
+    for (let m = 0; m < months; m++) a = (a >= INVEST_START ? a * (1 + r) : a) + monthly;
     return a;
   };
   if (reach(0) >= target) return 0;
@@ -678,23 +747,82 @@ function renderGoals() {
     $("g2-detail").textContent = "設定で月の生活費を入力すると、経済的自由ラインを計算します。";
   }
 
-  // GOAL 3: 好きな車
-  const car = state.car;
-  $("g3-title").textContent = car.name ? car.name : "好きな車";
-  if (car.price > 0) {
-    const ratio = assets / car.price;
-    setMeter($("g3-bar"), ratio);
-    $("g3-pct").innerHTML = "";
-    const span = document.createElement("span");
-    if (ratio >= 1) { span.className = "done"; span.textContent = "いつでも買えます!"; }
-    else span.textContent = (ratio * 100).toFixed(1) + "%";
-    $("g3-pct").appendChild(span);
-    $("g3-detail").textContent = `価格: ${fmtYen(car.price)}${ratio < 1 ? ` / あと${fmtYen(car.price - assets)}` : ""}`;
+  // GOAL 3: 好きな車たち(何台でも)
+  const body = $("g3-body");
+  body.innerHTML = "";
+  if (!state.cars.length) {
+    const d = document.createElement("div");
+    d.className = "g-detail";
+    d.textContent = "下の「ガレージ」で車を登録できます。何台でもOK。";
+    body.appendChild(d);
   } else {
-    setMeter($("g3-bar"), 0);
-    $("g3-pct").textContent = "—";
-    $("g3-detail").textContent = "下の設定で車種と価格を登録できます。";
+    state.cars.forEach(car => {
+      const row = document.createElement("div");
+      row.className = "car-row";
+      const nm = document.createElement("span"); nm.className = "c-name"; nm.textContent = car.name;
+      const pct = document.createElement("span"); pct.className = "c-pct";
+      const ratio = car.price > 0 ? assets / car.price : 0;
+      if (car.price > 0 && ratio >= 1) {
+        const sp = document.createElement("span"); sp.className = "done"; sp.textContent = "買える!";
+        pct.appendChild(sp);
+      } else {
+        pct.textContent = car.price > 0 ? (ratio * 100).toFixed(1) + "%" : "価格未設定";
+      }
+      row.append(nm, pct);
+      const meter = document.createElement("div"); meter.className = "meter small";
+      const bar = document.createElement("span"); meter.appendChild(bar);
+      body.append(row, meter);
+      setMeter(bar, ratio);
+    });
   }
+}
+
+function renderGarage() {
+  const wrap = $("garage");
+  wrap.innerHTML = "";
+  const rec = latestRecord();
+  const assets = rec ? rec.v : 0;
+  if (!state.cars.length) {
+    const d = document.createElement("div");
+    d.className = "habit-empty";
+    d.textContent = "まだ登録がありません。迷っている車も全部登録してOK。価格が変わったらここで更新してください。";
+    wrap.appendChild(d);
+    return;
+  }
+  state.cars.forEach(car => {
+    const row = document.createElement("div");
+    row.className = "garage-row";
+    const nm = document.createElement("input");
+    nm.type = "text"; nm.className = "g-name"; nm.value = car.name;
+    nm.setAttribute("aria-label", "車名");
+    nm.addEventListener("change", () => {
+      car.name = nm.value.trim() || car.name;
+      saveState(); renderGoals(); renderToday();
+    });
+    const pr = document.createElement("input");
+    pr.type = "text"; pr.className = "g-price"; pr.value = car.price ? fmtYen(car.price).replace("円", "") : "";
+    pr.placeholder = "価格";
+    pr.setAttribute("aria-label", car.name + " の最新価格");
+    pr.addEventListener("change", () => {
+      const v = parseYen(pr.value);
+      if (!isNaN(v) && v >= 0) car.price = v;
+      pr.value = car.price ? fmtYen(car.price).replace("円", "") : "";
+      saveState(); renderGoals(); renderToday();
+    });
+    const pct = document.createElement("span");
+    pct.className = "g-pct";
+    pct.textContent = car.price > 0 ? (Math.min(assets / car.price, 1) * 100).toFixed(1) + "%" : "—";
+    const del = document.createElement("button");
+    del.type = "button"; del.className = "ghost"; del.textContent = "削除";
+    del.addEventListener("click", () => {
+      if (confirm(`「${car.name}」をガレージから外しますか?`)) {
+        state.cars = state.cars.filter(c => c.id !== car.id);
+        saveState(); renderGarage(); renderGoals(); renderToday();
+      }
+    });
+    row.append(nm, pr, pct, del);
+    wrap.appendChild(row);
+  });
 }
 
 /* ============================================================
@@ -1100,33 +1228,50 @@ function renderSim() {
     return;
   }
   const { monthly, rate, targetYears } = state.sim;
-  const months = monthsToTarget(rec.v, monthly, rate, GOAL);
+  const savingPhase = rec.v < INVEST_START;
 
   const big = document.createElement("div"); big.className = "big";
   const note = document.createElement("div"); note.className = "note";
-  if (months === 0) {
-    big.textContent = "100億円 達成済み!";
-  } else if (!isFinite(months)) {
-    big.textContent = "80年以内には届きません";
-    note.textContent = "積立額か利回り(=収入を生む仕組み)を大きく変える必要があります。";
+  if (savingPhase) {
+    // 貯蓄フェーズ: 100万円だけを見る。投資の話はしない。
+    const months = monthsToTarget(rec.v, monthly, 0, INVEST_START);
+    if (!isFinite(months) || monthly <= 0) {
+      big.textContent = "まずは 100万円";
+      note.textContent = "毎月の積立額を入れると、100万円の到達予定が出ます。";
+    } else {
+      const yrs = Math.floor(months / 12), mo = months % 12;
+      const reachDate = new Date();
+      reachDate.setMonth(reachDate.getMonth() + months);
+      big.textContent = `100万円まで あと ${yrs ? yrs + "年" : ""}${mo || !yrs ? mo + "ヶ月" : ""}`;
+      note.textContent = `月${fmtYen(monthly)}の積立なら ${reachDate.getFullYear()}年${reachDate.getMonth() + 1}月に100万円。いまは貯めることだけに集中。その先の予定は下の表に。`;
+    }
+    wrap.append(big, note);
   } else {
-    const yrs = Math.floor(months / 12), mo = months % 12;
-    const reachDate = new Date();
-    reachDate.setMonth(reachDate.getMonth() + months);
-    big.textContent = `あと ${yrs}年${mo ? mo + "ヶ月" : ""}`;
-    note.textContent = `月${fmtYen(monthly)}の追加投資・年利${rate}%なら ${reachDate.getFullYear()}年に100億円へ到達します。`;
-  }
-  wrap.append(big, note);
+    const months = monthsToTarget(rec.v, monthly, rate, GOAL);
+    if (months === 0) {
+      big.textContent = "100億円 達成済み!";
+    } else if (!isFinite(months)) {
+      big.textContent = "80年以内には届きません";
+      note.textContent = "積立額か利回り(=収入を生む仕組み)を大きく変える必要があります。";
+    } else {
+      const yrs = Math.floor(months / 12), mo = months % 12;
+      const reachDate = new Date();
+      reachDate.setMonth(reachDate.getMonth() + months);
+      big.textContent = `あと ${yrs}年${mo ? mo + "ヶ月" : ""}`;
+      note.textContent = `月${fmtYen(monthly)}の追加投資・年利${rate}%なら ${reachDate.getFullYear()}年に100億円へ到達します。`;
+    }
+    wrap.append(big, note);
 
-  // 目標年数に対する必要利回り
-  const req = requiredRate(rec.v, monthly, targetYears, GOAL);
-  const reqDiv = document.createElement("div");
-  reqDiv.className = "note";
-  reqDiv.style.marginTop = "10px";
-  if (req === 0) reqDiv.textContent = `${targetYears}年での到達に運用リターンは不要です(積立だけで届きます)。`;
-  else if (!isFinite(req)) reqDiv.textContent = `${targetYears}年で到達するには年利300%超が必要です。事業など運用以外のレバレッジを検討しましょう。`;
-  else reqDiv.textContent = `${targetYears}年で100億円に到達するには 年利${req.toFixed(1)}% が必要です。`;
-  wrap.appendChild(reqDiv);
+    // 目標年数に対する必要利回り(投資フェーズのみ表示)
+    const req = requiredRate(rec.v, monthly, targetYears, GOAL);
+    const reqDiv = document.createElement("div");
+    reqDiv.className = "note";
+    reqDiv.style.marginTop = "10px";
+    if (req === 0) reqDiv.textContent = `${targetYears}年での到達に運用リターンは不要です(積立だけで届きます)。`;
+    else if (!isFinite(req)) reqDiv.textContent = `${targetYears}年で到達するには年利300%超が必要です。事業など運用以外のレバレッジを検討しましょう。`;
+    else reqDiv.textContent = `${targetYears}年で100億円に到達するには 年利${req.toFixed(1)}% が必要です。`;
+    wrap.appendChild(reqDiv);
+  }
 
   // マイルストーン到達予定
   const etaWrap = document.createElement("div");
@@ -1294,16 +1439,16 @@ $("set-living").addEventListener("change", () => {
   state.living.monthly = isNaN(v) || v < 0 ? 0 : v;
   saveState(); renderGoals();
 });
-$("set-car-name").value = state.car.name;
-$("set-car-name").addEventListener("change", () => {
-  state.car.name = $("set-car-name").value.trim();
-  saveState(); renderGoals();
-});
-$("set-car-price").value = state.car.price ? fmtYen(state.car.price).replace("円", "") : "";
-$("set-car-price").addEventListener("change", () => {
-  const v = parseYen($("set-car-price").value);
-  state.car.price = isNaN(v) || v < 0 ? 0 : v;
-  saveState(); renderGoals();
+// ガレージ: 車の追加
+$("car-form").addEventListener("submit", e => {
+  e.preventDefault();
+  const name = $("car-name-input").value.trim();
+  const price = parseYen($("car-price-input").value);
+  if (!name || isNaN(price) || price <= 0) return;
+  state.cars.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name, price });
+  $("car-name-input").value = "";
+  $("car-price-input").value = "";
+  saveState(); renderGarage(); renderGoals(); renderToday();
 });
 
 // データ入出力
@@ -1325,7 +1470,7 @@ $("import-file").addEventListener("change", () => {
       const parsed = JSON.parse(reader.result);
       if (!parsed || !Array.isArray(parsed.records)) throw new Error("形式が不正です");
       if (!confirm("現在のデータを読み込んだ内容で置き換えます。よろしいですか?")) return;
-      state = Object.assign(defaultState(), parsed);
+      state = migrateState(parsed);
       sortRecords();
       saveState();
       // 入力欄も更新
@@ -1333,8 +1478,6 @@ $("import-file").addEventListener("change", () => {
       $("sim-rate").value = state.sim.rate;
       $("sim-target-years").value = state.sim.targetYears;
       $("set-living").value = state.living.monthly ? fmtYen(state.living.monthly).replace("円", "") : "";
-      $("set-car-name").value = state.car.name;
-      $("set-car-price").value = state.car.price ? fmtYen(state.car.price).replace("円", "") : "";
       renderAll();
     } catch (err) {
       alert("読み込みに失敗しました: " + err.message);
@@ -1350,6 +1493,7 @@ $("import-file").addEventListener("change", () => {
 function renderAll() {
   renderToday();
   renderGoals();
+  renderGarage();
   renderHero();
   renderHistory();
   renderChart();
@@ -1358,6 +1502,56 @@ function renderAll() {
 }
 markOpenedToday();
 renderAll();
+
+/* ============================================================
+   毎日リマインド(PWA通知)
+   ============================================================ */
+const REMINDER_HELP = "通知はWeb公開時(GitHub Pages等)にホーム画面へ追加すると使えます。";
+function reminderStatusText() {
+  if (!("Notification" in window)) return "この環境では通知を使えません。";
+  if (location.protocol === "file:") return REMINDER_HELP;
+  if (state.reminder.enabled && Notification.permission === "granted") return "設定済み。毎日お知らせします🔔";
+  return "";
+}
+$("reminder-status").textContent = reminderStatusText();
+
+$("reminder-btn").addEventListener("click", async () => {
+  const status = $("reminder-status");
+  if (!("Notification" in window) || location.protocol === "file:") {
+    status.textContent = reminderStatusText() || REMINDER_HELP;
+    return;
+  }
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") {
+      status.textContent = "通知が許可されませんでした。ブラウザの設定から許可できます。";
+      return;
+    }
+    state.reminder.enabled = true;
+    saveState();
+    if ("serviceWorker" in navigator) {
+      const reg = await navigator.serviceWorker.ready;
+      if ("periodicSync" in reg) {
+        try {
+          await reg.periodicSync.register("daily-reminder", { minInterval: 20 * 60 * 60 * 1000 });
+          status.textContent = "毎日リマインドを設定しました🔔(ホーム画面に追加すると配信が安定します)";
+          return;
+        } catch (e) { /* periodicSync 非対応・権限なしは下のフォールバックへ */ }
+      }
+      reg.showNotification("🧭 100億コンパス", {
+        body: "リマインド設定完了。明日も開くだけで前進。",
+        icon: "icon-192.png", tag: "setup",
+      });
+    }
+    status.textContent = "通知を許可しました。ホーム画面に追加(インストール)すると毎日配信されます。";
+  } catch (e) {
+    status.textContent = "設定に失敗しました: " + e.message;
+  }
+});
+
+if ("serviceWorker" in navigator && location.protocol !== "file:") {
+  navigator.serviceWorker.register("./sw.js").catch(() => {});
+}
 
 $("tab-today").addEventListener("click", () => switchView("today"));
 $("tab-dashboard").addEventListener("click", () => switchView("dashboard"));
