@@ -92,10 +92,12 @@
   .car-row .c-pct { color: var(--text-secondary); }
   .car-row .c-pct .done { color: var(--good); font-weight: 600; }
   .meter.small { height: 6px; margin-top: 3px; }
-  .garage-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
-  .garage-row .g-name { flex: 2; min-width: 150px; }
-  .garage-row .g-price { flex: 1; min-width: 110px; }
-  .garage-row .g-pct { font-size: 12.5px; color: var(--text-secondary); min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
+  .garage-head, .garage-row {
+    display: grid; grid-template-columns: minmax(0,1fr) 104px 52px 34px;
+    gap: 8px; align-items: center; margin-bottom: 8px;
+  }
+  .garage-head { font-size: 11.5px; color: var(--text-muted); margin-bottom: 4px; }
+  .garage-row .g-pct { font-size: 12.5px; color: var(--text-secondary); text-align: right; font-variant-numeric: tabular-nums; }
 
   .card {
     background: var(--surface-1);
@@ -214,12 +216,20 @@
   }
   ul.habits li:last-child { border-bottom: none; }
   ul.habits label.habit-main { display: flex; align-items: center; gap: 14px; flex: 1; cursor: pointer; min-width: 0; }
-  .habit-check { width: 26px; height: 26px; accent-color: var(--series-1); flex: none; cursor: pointer; }
+  .habit-check { width: 28px; height: 28px; accent-color: var(--series-1); flex: none; cursor: pointer; }
   .habit-name { flex: 1; font-size: 16px; }
   .habit-name.done-today { color: var(--text-muted); text-decoration: line-through; }
+  .hw-wrap { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .hw-cap { font-size: 10px; color: var(--text-muted); }
   .habit-week { display: flex; gap: 4px; }
-  .habit-week i { width: 8px; height: 8px; border-radius: 50%; background: var(--grid); }
+  .habit-week i { width: 9px; height: 9px; border-radius: 50%; background: var(--grid); }
   .habit-week i.on { background: var(--series-1); }
+  button.del-x {
+    padding: 3px 10px; font-size: 14px; line-height: 1.4;
+    color: var(--text-muted); border: none; background: transparent;
+    border-radius: 8px; cursor: pointer;
+  }
+  button.del-x:hover { background: var(--accent-wash); color: var(--text-primary); }
   .habit-streak { font-size: 12.5px; color: var(--text-secondary); min-width: 70px; text-align: right; font-variant-numeric: tabular-nums; }
   .habit-streak strong { color: var(--text-primary); }
   .habit-empty { color: var(--text-muted); font-size: 13.5px; padding: 12px 0; }
@@ -269,7 +279,7 @@
       <div class="today-rate" id="today-rate"></div>
       <ul class="habits" id="habit-list"></ul>
       <form class="habit-add" id="habit-form" style="margin-top:14px;margin-bottom:0">
-        <input type="text" id="habit-name" placeholder="例: 収入源になる作業を2時間 / 支出を記録する" autocomplete="off" required>
+        <input type="text" id="habit-name" placeholder="新しい行動を追加(例: 作業を2時間)" autocomplete="off" required>
         <button type="submit" class="primary">追加</button>
       </form>
     </section>
@@ -355,7 +365,7 @@
   <!-- チャート -->
   <section class="card">
     <div class="chart-head">
-      <h2 style="margin:0">資産推移と100億への軌道<span class="sub">縦軸は対数スケール</span></h2>
+      <h2 style="margin:0">資産推移<span class="sub" id="chart-sub"></span></h2>
       <div style="display:flex;gap:14px;align-items:center">
         <div class="legend" id="chart-legend" hidden>
           <span><i class="key k1"></i>実績</span>
@@ -381,7 +391,7 @@
           <input type="text" id="sim-monthly" placeholder="例: 3万" autocomplete="off">
         </div>
         <div class="field">
-          <label for="sim-rate">想定年利(%・100万円到達後から適用)</label>
+          <label for="sim-rate">想定年利(%)※100万円を貯めたあとから</label>
           <input type="number" id="sim-rate" min="0" max="200" step="0.5" value="7">
         </div>
         <div class="field">
@@ -423,7 +433,7 @@
   </section>
   </div><!-- /view-dashboard -->
 
-  <footer class="app">データはこのブラウザ(localStorage)にのみ保存されます。定期的な書き出しをおすすめします。</footer>
+  <footer class="app">データはこの端末の中だけに保存され、外部に送られることはありません。バックアップは「設定とデータ」の書き出しから。</footer>
 </main>
 
 <script>
@@ -511,6 +521,12 @@ function fmtYenShort(v) { // 軸ラベル用
 function trimNum(n) {
   return (Math.round(n * 100) / 100).toLocaleString("ja-JP");
 }
+function fmtPct(p) { // 読みやすい%表示(小数4桁のような数字を出さない)
+  if (p >= 100) return "100%";
+  if (p >= 1) return p.toFixed(1) + "%";
+  if (p >= 0.01) return p.toFixed(2) + "%";
+  return "0.01%未満";
+}
 function parseYen(str) {
   if (typeof str !== "string") return NaN;
   let s = str.trim().replace(/[,，\s円¥]/g, "")
@@ -587,12 +603,7 @@ function renderToday() {
     c.textContent = text;
     strip.appendChild(c);
   };
-  if (recNow) {
-    const pct = recNow.v / GOAL * 100;
-    chip(`💰 100億円 — ${pct >= 1 ? pct.toFixed(2) : pct.toFixed(4)}%`);
-  } else {
-    chip("💰 100億円");
-  }
+  chip("💰 100億円");
   chip("🕊 自由な生活");
   if (state.cars.length) {
     const names = state.cars.map(c => c.name);
@@ -601,19 +612,19 @@ function renderToday() {
     chip("🚗 好きな車");
   }
 
-  // 資産スナップショット
+  // 資産スナップショット: 主役は「次のマイルストーン」。
+  // 100億に対する%は、100万円を超えるまで見せない(小さすぎて心が折れる数字のため)。
   const rec = latestRecord();
   if (rec) {
     $("mini-assets").textContent = fmtYen(rec.v);
-    const pct = rec.v / GOAL * 100;
-    $("mini-goal-pct").textContent = `100億まで ${(pct >= 1 ? pct.toFixed(2) : pct.toFixed(4))}%`;
+    $("mini-goal-pct").textContent = rec.v >= INVEST_START ? `100億まで ${fmtPct(rec.v / GOAL * 100)}` : "";
     const next = MILESTONES.find(m => m.v > rec.v);
     if (next) {
       $("mini-ms").hidden = false;
       const prevMsV = MILESTONES.filter(m => m.v <= rec.v).map(m => m.v).pop() || 0;
       const ratio = (rec.v - prevMsV) / (next.v - prevMsV);
-      $("mini-ms-label").textContent = `次のマイルストーン: ${next.label}円`;
-      $("mini-ms-pct").textContent = (ratio * 100).toFixed(1) + "%";
+      $("mini-ms-label").textContent = `${next.label}円まで あと${fmtYen(next.v - rec.v)}`;
+      $("mini-ms-pct").textContent = (ratio * 100).toFixed(0) + "%";
       setMeter($("mini-ms-bar"), ratio);
     } else {
       $("mini-ms").hidden = true;
@@ -719,7 +730,7 @@ function renderGoals() {
   setMeter($("g1-bar"), assets / GOAL);
   if (rec) {
     const pct = assets / GOAL * 100;
-    $("g1-pct").textContent = (pct >= 100 ? "達成! " : "") + (pct >= 1 ? pct.toFixed(2) : pct.toFixed(4)) + "%";
+    $("g1-pct").textContent = (pct >= 100 ? "達成! " : "") + fmtPct(pct);
     const next = MILESTONES.find(m => m.v > assets);
     $("g1-detail").textContent = next
       ? `次のマイルストーン「${next.label}円」まで あと${fmtYen(next.v - assets)}`
@@ -738,7 +749,7 @@ function renderGoals() {
     $("g2-pct").innerHTML = "";
     const span = document.createElement("span");
     if (ratio >= 1) { span.className = "done"; span.textContent = "経済的自由を達成!"; }
-    else span.textContent = (ratio * 100).toFixed(1) + "%";
+    else span.textContent = fmtPct(ratio * 100);
     $("g2-pct").appendChild(span);
     $("g2-detail").textContent = `必要資産: ${fmtYen(freedomLine)}(月${fmtYen(living)} × 12ヶ月 × 25年)`;
   } else {
@@ -766,7 +777,7 @@ function renderGoals() {
         const sp = document.createElement("span"); sp.className = "done"; sp.textContent = "買える!";
         pct.appendChild(sp);
       } else {
-        pct.textContent = car.price > 0 ? (ratio * 100).toFixed(1) + "%" : "価格未設定";
+        pct.textContent = car.price > 0 ? fmtPct(ratio * 100) : "価格未設定";
       }
       row.append(nm, pct);
       const meter = document.createElement("div"); meter.className = "meter small";
@@ -789,31 +800,41 @@ function renderGarage() {
     wrap.appendChild(d);
     return;
   }
+  const head = document.createElement("div");
+  head.className = "garage-head";
+  ["車名", "価格", "達成率", ""].forEach(t => {
+    const s = document.createElement("span");
+    s.textContent = t;
+    if (t === "達成率") s.style.textAlign = "right";
+    head.appendChild(s);
+  });
+  wrap.appendChild(head);
   state.cars.forEach(car => {
     const row = document.createElement("div");
     row.className = "garage-row";
     const nm = document.createElement("input");
-    nm.type = "text"; nm.className = "g-name"; nm.value = car.name;
+    nm.type = "text"; nm.value = car.name;
     nm.setAttribute("aria-label", "車名");
     nm.addEventListener("change", () => {
       car.name = nm.value.trim() || car.name;
       saveState(); renderGoals(); renderToday();
     });
     const pr = document.createElement("input");
-    pr.type = "text"; pr.className = "g-price"; pr.value = car.price ? fmtYen(car.price).replace("円", "") : "";
+    pr.type = "text"; pr.value = car.price ? fmtYen(car.price).replace("円", "") : "";
     pr.placeholder = "価格";
     pr.setAttribute("aria-label", car.name + " の最新価格");
     pr.addEventListener("change", () => {
       const v = parseYen(pr.value);
       if (!isNaN(v) && v >= 0) car.price = v;
       pr.value = car.price ? fmtYen(car.price).replace("円", "") : "";
-      saveState(); renderGoals(); renderToday();
+      saveState(); renderGarage(); renderGoals(); renderToday();
     });
     const pct = document.createElement("span");
     pct.className = "g-pct";
-    pct.textContent = car.price > 0 ? (Math.min(assets / car.price, 1) * 100).toFixed(1) + "%" : "—";
+    pct.textContent = car.price > 0 ? fmtPct(Math.min(assets / car.price, 1) * 100) : "—";
     const del = document.createElement("button");
-    del.type = "button"; del.className = "ghost"; del.textContent = "削除";
+    del.type = "button"; del.className = "del-x"; del.textContent = "✕";
+    del.setAttribute("aria-label", car.name + " をガレージから外す");
     del.addEventListener("click", () => {
       if (confirm(`「${car.name}」をガレージから外しますか?`)) {
         state.cars = state.cars.filter(c => c.id !== car.id);
@@ -896,8 +917,11 @@ function renderHistory() {
     const td1 = document.createElement("td"); td1.textContent = r.d;
     const td2 = document.createElement("td"); td2.textContent = fmtYen(r.v); td2.className = "num";
     const td3 = document.createElement("td");
-    const del = document.createElement("button"); del.type = "button"; del.className = "ghost"; del.textContent = "削除";
-    del.addEventListener("click", () => deleteRecord(r.d));
+    const del = document.createElement("button"); del.type = "button"; del.className = "del-x"; del.textContent = "✕";
+    del.setAttribute("aria-label", r.d + " の記録を削除");
+    del.addEventListener("click", () => {
+      if (confirm(`${fmtDate(r.d)}の記録(${fmtYen(r.v)})を削除しますか?`)) deleteRecord(r.d);
+    });
     td3.appendChild(del);
     tr.append(td1, td2, td3);
     tbody.appendChild(tr);
@@ -919,9 +943,12 @@ function buildChartSeries() {
   const start = actual[0].t;
   const last = actual[actual.length - 1];
 
+  // 貯蓄フェーズ(100万円未満)は「100万円までの道のり」にズームして描く
+  const savingPhase = last.v < INVEST_START;
+  const target = savingPhase ? INVEST_START : GOAL;
   const { monthly, rate } = state.sim;
-  const proj = projectMonths(last.v, monthly, rate, GOAL);
-  const reachedGoal = proj[proj.length - 1] >= GOAL;
+  const proj = projectMonths(last.v, monthly, rate, target);
+  const reachedGoal = proj[proj.length - 1] >= target;
   const MONTH = 30.44 * 24 * 3600 * 1000;
   const projPts = [];
   const step = proj.length > 480 ? 12 : proj.length > 120 ? 6 : proj.length > 36 ? 3 : 1;
@@ -937,7 +964,7 @@ function buildChartSeries() {
     actual: interp(actual, t),
     proj: t >= last.t ? interp(projPts, t) : null,
   }));
-  return { actual, projPts, samples, start, end: projPts[projPts.length - 1].t, reachedGoal };
+  return { actual, projPts, samples, start, end: projPts[projPts.length - 1].t, reachedGoal, savingPhase, target };
 }
 function interp(pts, t) {
   if (t < pts[0].t || t > pts[pts.length - 1].t) return null;
@@ -961,14 +988,16 @@ function renderChart() {
   const data = buildChartSeries();
   if (!data) {
     legend.hidden = true;
+    $("chart-sub").textContent = "";
     const empty = document.createElement("div");
     empty.className = "chart-empty";
-    empty.textContent = "資産を記録すると、実績と100億円への予測軌道がここに表示されます。";
+    empty.textContent = "資産を記録すると、実績と予測の軌道がここに表示されます。";
     host.appendChild(empty);
     renderTable(null);
     return;
   }
   legend.hidden = false;
+  $("chart-sub").textContent = data.savingPhase ? "まずは100万円まで" : "100億への軌道(縦軸は桁で刻み)";
 
   const css = getComputedStyle(document.documentElement);
   const C = {
@@ -986,13 +1015,23 @@ function renderChart() {
   const pad = { top: 18, right: 76, bottom: 34, left: 58 };
   const pw = W - pad.left - pad.right, ph = H - pad.top - pad.bottom;
 
-  // Yドメイン: 対数。最小は実績最小値の1桁下に丸め、最大は常に100億。
-  const minV = Math.max(1e4, Math.min(...data.actual.map(p => p.v)));
-  const yMin = Math.pow(10, Math.floor(Math.log10(minV)));
-  const yMax = GOAL;
-  const ly0 = Math.log10(yMin), ly1 = Math.log10(yMax);
+  // Yドメイン:
+  //  貯蓄フェーズ → 0〜100万円のふつうの目盛り(直感的)
+  //  それ以降   → 対数(桁刻み)で100億まで
   const x = t => pad.left + (t - data.start) / Math.max(1, data.end - data.start) * pw;
-  const y = v => pad.top + (1 - (Math.log10(Math.max(v, yMin)) - ly0) / (ly1 - ly0)) * ph;
+  let y, yTicks;
+  if (data.savingPhase) {
+    const yMax = INVEST_START;
+    y = v => pad.top + (1 - Math.min(Math.max(v, 0), yMax) / yMax) * ph;
+    yTicks = [0, 2e5, 4e5, 6e5, 8e5, 1e6];
+  } else {
+    const minV = Math.max(1e4, Math.min(...data.actual.map(p => p.v)));
+    const yMin = Math.pow(10, Math.floor(Math.log10(minV)));
+    const ly0 = Math.log10(yMin), ly1 = Math.log10(GOAL);
+    y = v => pad.top + (1 - (Math.log10(Math.max(v, yMin)) - ly0) / (ly1 - ly0)) * ph;
+    yTicks = [];
+    for (let e10 = Math.ceil(ly0); e10 <= ly1; e10++) yTicks.push(Math.pow(10, e10));
+  }
 
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(NS, "svg");
@@ -1005,11 +1044,10 @@ function renderChart() {
     return e;
   };
 
-  // Y軸グリッド: 10の累乗のみ
-  for (let e10 = Math.ceil(ly0); e10 <= ly1; e10++) {
-    const v = Math.pow(10, e10);
+  // Y軸グリッド(目標の目盛りだけ太字で強調)
+  yTicks.forEach(v => {
     const yy = y(v);
-    const isGoal = v === GOAL;
+    const isGoal = v === data.target;
     svg.appendChild(el("line", { x1: pad.left, x2: pad.left + pw, y1: yy, y2: yy, stroke: C.grid, "stroke-width": 1 }));
     const label = el("text", {
       x: pad.left - 8, y: yy + 4, "text-anchor": "end",
@@ -1017,24 +1055,35 @@ function renderChart() {
       "font-weight": isGoal ? 700 : 400,
       style: "font-variant-numeric: tabular-nums",
     });
-    label.textContent = fmtYenShort(v);
+    label.textContent = v === 0 ? "0" : fmtYenShort(v);
     svg.appendChild(label);
-  }
+  });
 
-  // X軸: 年ラベル(最大8個程度)
-  const startYear = new Date(data.start).getFullYear();
-  const endYear = new Date(data.end).getFullYear();
-  const span = Math.max(1, endYear - startYear);
-  const maxLabels = Math.max(2, Math.floor(pw / 70)); // ラベル1つあたり約70pxを確保
-  const stepY = Math.max(1, Math.ceil(span / maxLabels));
+  // X軸: 期間が短ければ月単位、長ければ年単位でラベルを打つ
   svg.appendChild(el("line", { x1: pad.left, x2: pad.left + pw, y1: pad.top + ph, y2: pad.top + ph, stroke: C.axis, "stroke-width": 1 }));
-  for (let yr = startYear; yr <= endYear; yr += stepY) {
-    const t = new Date(yr, 0, 1).getTime();
-    if (t < data.start || t > data.end) continue;
-    const xx = x(t);
-    const label = el("text", { x: xx, y: pad.top + ph + 20, "text-anchor": "middle", fill: C.muted, "font-size": 11, style: "font-variant-numeric: tabular-nums" });
-    label.textContent = yr + "年";
+  const maxLabels = Math.max(2, Math.floor(pw / 70)); // ラベル1つあたり約70pxを確保
+  const spanYears = (data.end - data.start) / (365.25 * 24 * 3600 * 1000);
+  const addXLabel = (t, text) => {
+    if (t < data.start || t > data.end) return;
+    const label = el("text", { x: x(t), y: pad.top + ph + 20, "text-anchor": "middle", fill: C.muted, "font-size": 11, style: "font-variant-numeric: tabular-nums" });
+    label.textContent = text;
     svg.appendChild(label);
+  };
+  if (spanYears <= 3.5) {
+    // 月単位(3/6ヶ月刻み)
+    const stepM = Math.max(1, Math.ceil(spanYears * 12 / maxLabels));
+    const d0 = new Date(data.start);
+    let d = new Date(d0.getFullYear(), d0.getMonth() + 1, 1);
+    for (; d.getTime() <= data.end; d = new Date(d.getFullYear(), d.getMonth() + stepM, 1)) {
+      addXLabel(d.getTime(), `${String(d.getFullYear()).slice(2)}年${d.getMonth() + 1}月`);
+    }
+  } else {
+    const startYear = new Date(data.start).getFullYear();
+    const endYear = new Date(data.end).getFullYear();
+    const stepY = Math.max(1, Math.ceil(Math.max(1, endYear - startYear) / maxLabels));
+    for (let yr = startYear; yr <= endYear; yr += stepY) {
+      addXLabel(new Date(yr, 0, 1).getTime(), yr + "年");
+    }
   }
 
   const pathOf = pts => pts.map((p, i) => (i ? "L" : "M") + x(p.t).toFixed(1) + " " + y(p.v).toFixed(1)).join(" ");
@@ -1049,7 +1098,10 @@ function renderChart() {
     if (data.reachedGoal) {
       svg.appendChild(el("circle", { cx: x(goalPt.t), cy: y(goalPt.v), r: 5, fill: C.s2, stroke: C.surface, "stroke-width": 2 }));
       const gl = el("text", { x: Math.min(x(goalPt.t), pad.left + pw) , y: y(goalPt.v) - 10, "text-anchor": "end", fill: C.secondary, "font-size": 11.5, "font-weight": 600 });
-      gl.textContent = new Date(goalPt.t).getFullYear() + "年 100億到達";
+      const gd = new Date(goalPt.t);
+      gl.textContent = data.savingPhase
+        ? `${gd.getFullYear()}年${gd.getMonth() + 1}月 100万円!`
+        : `${gd.getFullYear()}年 100億到達`;
       svg.appendChild(gl);
     }
   }
@@ -1274,6 +1326,7 @@ function renderSim() {
   }
 
   // マイルストーン到達予定
+  // 遠い未来の「80年以上」が並ぶと萎えるので、普段は直近3つだけ見せる
   const etaWrap = document.createElement("div");
   etaWrap.className = "sim-eta";
   const table = document.createElement("table");
@@ -1284,26 +1337,42 @@ function renderSim() {
   const tbody = document.createElement("tbody");
   const proj = projectMonths(rec.v, monthly, rate, GOAL);
   const now = new Date();
-  MILESTONES.forEach(m => {
+  const achieved = MILESTONES.filter(m => rec.v >= m.v);
+  const pending = MILESTONES.filter(m => rec.v < m.v);
+  const shown = simEtaExpanded ? pending : pending.slice(0, 3);
+  if (achieved.length) {
+    const tr = document.createElement("tr");
+    const td1 = document.createElement("td"); td1.textContent = achieved.map(m => m.label).join("・") + "円";
+    const td2 = document.createElement("td"); td2.textContent = "達成済み ✓"; td2.className = "reached";
+    tr.append(td1, td2);
+    tbody.appendChild(tr);
+  }
+  shown.forEach(m => {
     const tr = document.createElement("tr");
     const td1 = document.createElement("td"); td1.textContent = m.label + "円";
     const td2 = document.createElement("td");
-    if (rec.v >= m.v) { td2.textContent = "達成済み ✓"; td2.className = "reached"; }
+    const idx = proj.findIndex(v => v >= m.v);
+    if (idx < 0) td2.textContent = "80年以上";
     else {
-      const idx = proj.findIndex(v => v >= m.v);
-      if (idx < 0) td2.textContent = "80年以上";
-      else {
-        const d = new Date(now.getFullYear(), now.getMonth() + idx, 1);
-        td2.textContent = `${d.getFullYear()}年${d.getMonth() + 1}月`;
-      }
+      const d = new Date(now.getFullYear(), now.getMonth() + idx, 1);
+      td2.textContent = `${d.getFullYear()}年${d.getMonth() + 1}月`;
     }
     tr.append(td1, td2);
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
   etaWrap.appendChild(table);
+  if (pending.length > 3) {
+    const more = document.createElement("button");
+    more.type = "button"; more.className = "ghost";
+    more.style.marginTop = "8px";
+    more.textContent = simEtaExpanded ? "とじる" : `100億までの残り${pending.length - 3}件も見る`;
+    more.addEventListener("click", () => { simEtaExpanded = !simEtaExpanded; renderSim(); });
+    etaWrap.appendChild(more);
+  }
   wrap.appendChild(etaWrap);
 }
+let simEtaExpanded = false;
 
 /* ============================================================
    レンダリング — 習慣
@@ -1322,7 +1391,7 @@ function renderHabits() {
   if (!state.habits.length) {
     const li = document.createElement("li");
     li.className = "habit-empty";
-    li.textContent = "毎日やる行動を追加しましょう。例:「事業のための作業を2時間」「資産を増やす学習を30分」";
+    li.textContent = "毎日やる小さな行動を、下の欄からひとつ追加してみましょう。";
     list.appendChild(li);
     $("today-rate").textContent = "";
     return;
@@ -1344,16 +1413,20 @@ function renderHabits() {
     name.className = "habit-name" + (h.done[today] ? " done-today" : "");
     name.textContent = h.name;
     main.append(cb, name);
-    // 直近7日ドット
+    // 直近7日ドット(何のドットか分かるようキャプション付き)
+    const weekWrap = document.createElement("span");
+    weekWrap.className = "hw-wrap";
     const week = document.createElement("span");
     week.className = "habit-week";
-    week.title = "直近7日";
     for (let i = 6; i >= 0; i--) {
       const d = new Date(); d.setDate(d.getDate() - i);
       const dot = document.createElement("i");
       if (h.done[todayStr(d)]) dot.className = "on";
       week.appendChild(dot);
     }
+    const cap = document.createElement("span");
+    cap.className = "hw-cap"; cap.textContent = "直近7日";
+    weekWrap.append(week, cap);
     const streak = document.createElement("span");
     streak.className = "habit-streak";
     const st = habitStreak(h);
@@ -1361,14 +1434,15 @@ function renderHabits() {
     const strong = document.createElement("strong"); strong.textContent = st;
     streak.append(strong, document.createTextNode("日連続"));
     const del = document.createElement("button");
-    del.type = "button"; del.className = "ghost"; del.textContent = "削除";
+    del.type = "button"; del.className = "del-x"; del.textContent = "✕";
+    del.setAttribute("aria-label", h.name + " を削除");
     del.addEventListener("click", () => {
       if (confirm(`「${h.name}」を削除しますか?記録も消えます。`)) {
         state.habits = state.habits.filter(x => x.id !== h.id);
         saveState(); renderHabits();
       }
     });
-    li.append(main, week, streak, del);
+    li.append(main, weekWrap, streak, del);
     list.appendChild(li);
     if (h.done[today]) doneCount++;
   });
@@ -1506,7 +1580,7 @@ renderAll();
 /* ============================================================
    毎日リマインド(PWA通知)
    ============================================================ */
-const REMINDER_HELP = "通知はWeb公開時(GitHub Pages等)にホーム画面へ追加すると使えます。";
+const REMINDER_HELP = "通知は、スマホでアプリのページ(公開URL)を開いてから設定できます。";
 function reminderStatusText() {
   if (!("Notification" in window)) return "この環境では通知を使えません。";
   if (location.protocol === "file:") return REMINDER_HELP;
