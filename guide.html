@@ -74,10 +74,19 @@
     border-radius: 8px; padding: 7px 10px; font-size: 14px;
   }
   input:focus, button:focus { outline: 2px solid var(--series-1); outline-offset: 1px; }
+  /* 実効タップ領域は44px以上を確保する(見た目のサイズは極力変えず、内部余白で確保) */
+  button {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
   button.primary { background: var(--series-1); color: #fff; border-color: transparent; font-weight: 600; cursor: pointer; }
   button.ghost { background: transparent; cursor: pointer; color: var(--text-secondary); }
   button.ghost:hover { background: var(--accent-wash); }
   button.del-x {
+    min-width: 44px; min-height: 44px;
     padding: 3px 10px; font-size: 14px; line-height: 1.4;
     color: var(--text-muted); border: none; background: transparent;
     border-radius: 8px; cursor: pointer;
@@ -131,12 +140,19 @@
   .mission-carry-label { font-size: 12.5px; color: var(--text-secondary); margin-bottom: 6px; }
   .mission-carry-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; font-size: 13.5px; }
   ul.mission-list { list-style: none; }
-  ul.mission-list li { display: flex; align-items: center; gap: 10px; padding: 10px 2px; border-bottom: 1px solid var(--grid); }
+  ul.mission-list li { display: flex; align-items: center; gap: 10px; padding: 2px; border-bottom: 1px solid var(--grid); }
   ul.mission-list li:last-child { border-bottom: none; }
-  ul.mission-list input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--series-1); cursor: pointer; flex: none; }
+  /* チェックボックス行全体をタップ領域にする。✕ボタンとは十分な間隔を確保して誤タップを防ぐ */
+  .mission-row-label {
+    display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;
+    min-height: 44px; padding: 10px 6px; margin: 0; border-radius: 8px; cursor: pointer;
+  }
+  .mission-row-label:hover { background: var(--accent-wash); }
+  ul.mission-list input[type="checkbox"] { width: 24px; height: 24px; accent-color: var(--series-1); cursor: pointer; flex: none; }
   .mission-text { flex: 1; font-size: 15px; }
   .mission-text.done-today { color: var(--text-muted); text-decoration: line-through; }
   .mission-templates { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  .mission-limit-msg { font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
 
   /* ---- 夜の締め ---- */
   .close-date-label { font-size: 13px; color: var(--text-muted); margin-bottom: 10px; }
@@ -164,7 +180,7 @@
   </header>
 
   <!-- 1. 今の指令 -->
-  <section class="card directive-card" id="directive-card">
+  <section class="card directive-card" id="directive-card" aria-live="polite">
     <div class="directive-label">今の指令</div>
     <div class="directive-headline" id="directive-headline"></div>
     <div class="directive-sub" id="directive-sub"></div>
@@ -186,7 +202,7 @@
   </section>
 
   <!-- 3. 今週の3ミッション -->
-  <section class="card">
+  <section class="card" id="missions-card">
     <h2>今週の3ミッション<span class="sub" id="missions-week-label"></span></h2>
     <div id="missions-prev"></div>
     <div id="missions-body"></div>
@@ -428,8 +444,10 @@ function directiveHabit(h) {
     headline: `まず「${h.name}」を片付けろ。3分で終わる。`,
     sub: "今日の行動リストから選んだ、いちばん効く1つ。",
     primaryLabel: "✔ やった",
+    primaryAria: `「${h.name}」をやったとして記録`,
     onPrimary: () => { markConsumed(id, "done"); renderAll(); },
     secondaryLabel: "あとで",
+    secondaryAria: `「${h.name}」を後回しにする`,
     onSecondary: () => { markConsumed(id, "skipped"); renderAll(); },
   };
 }
@@ -438,8 +456,10 @@ function directiveMission(m) {
     headline: `今週のミッション「${m.text}」を進めろ。`,
     sub: "今週決めた3つのうちの1つ。",
     primaryLabel: "✔ やった",
+    primaryAria: `ミッション「${m.text}」をやったとして記録`,
     onPrimary: () => { m.done = true; saveGuideState(); renderAll(); },
     secondaryLabel: "あとで",
+    secondaryAria: `ミッション「${m.text}」を後回しにする`,
     onSecondary: () => { markConsumed("mission:" + m.id, "skipped"); renderAll(); },
   };
 }
@@ -448,8 +468,10 @@ function directiveFirstMove(text, id) {
     headline: `まず「${text}」をやれ。決めたのは昨日の自分だ。`,
     sub: "前夜の締めで決めた、今日の最初の一手。",
     primaryLabel: "✔ やった",
+    primaryAria: `「${text}」をやったとして記録`,
     onPrimary: () => { markConsumed(id, "done"); renderAll(); },
     secondaryLabel: "あとで",
+    secondaryAria: `「${text}」を後回しにする`,
     onSecondary: () => { markConsumed(id, "skipped"); renderAll(); },
   };
 }
@@ -458,6 +480,7 @@ function directiveNightClose() {
     headline: "今日の振り返りをつけろ。3タップで終わる。",
     sub: "夜の締めがまだだ。下の「夜の締め」から。",
     primaryLabel: "夜の締めへ",
+    primaryAria: "夜の締めのセクションへ移動する",
     onPrimary: () => {
       const el = $("close-card");
       if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -474,6 +497,20 @@ function directiveNightDone(nc) {
 }
 function directiveAllDone() {
   return { headline: "全部終わってる。今日は勝ちだ。", sub: "この調子で明日も。" };
+}
+function directiveOnboarding() {
+  return {
+    headline: "まず、今週のミッションを1つ決めよう。",
+    sub: "今週やることを1つ決めるところから始めよう。",
+    primaryLabel: "ミッションを決める",
+    primaryAria: "今週のミッションを入力する場所へ移動する",
+    onPrimary: () => {
+      const el = $("missions-card");
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      const input = $("mission-input");
+      if (input) setTimeout(() => input.focus(), 300);
+    },
+  };
 }
 
 function pickDirective() {
@@ -496,6 +533,24 @@ function pickDirective() {
   if (hour >= 5 && hour < 11) phase = "morning";
   else if (hour >= 11 && hour < 18) phase = "afternoon";
 
+  const nightDate = nightKeyDate(now);
+  const nc = guideState.closes[nightDate];
+  const nightClosed = !!(nc && typeof nc.progress === "boolean" && typeof nc.waste === "boolean");
+
+  // 夜の締めが未実施の夜間は、オンボーディングよりも締めを優先する(既存ロジック維持)
+  if (phase === "night" && !nightClosed) {
+    return directiveNightClose();
+  }
+
+  // オンボーディング優先度: 今週のミッションもコンパスの習慣も一つも無い
+  // (=やることが本当に何も無い)新規顧客には、時間帯を問わず
+  // 「全部終わってる」ではなく最初の一歩を指し示す。
+  const noMissionsAtAll = (guideState.missions.items || []).length === 0;
+  const noHabitsAtAll = compass.habits.length === 0;
+  if (noMissionsAtAll && noHabitsAtAll) {
+    return directiveOnboarding();
+  }
+
   if (phase === "morning") {
     if (hasFirstMove) return directiveFirstMove(yClose.firstMove, firstMoveId);
     if (undoneHabits.length) return directiveHabit(undoneHabits[0]);
@@ -504,10 +559,8 @@ function pickDirective() {
     if (undoneMissions.length) return directiveMission(undoneMissions[0]);
     if (undoneHabits.length) return directiveHabit(undoneHabits[0]);
   } else {
-    const nightDate = nightKeyDate(now);
-    const nc = guideState.closes[nightDate];
-    const closed = nc && typeof nc.progress === "boolean" && typeof nc.waste === "boolean";
-    return closed ? directiveNightDone(nc) : directiveNightClose();
+    // 夜、かつ締め済み
+    return directiveNightDone(nc);
   }
   return directiveAllDone();
 }
@@ -521,12 +574,14 @@ function renderDirective() {
   if (d.primaryLabel) {
     const b = document.createElement("button");
     b.type = "button"; b.className = "primary"; b.textContent = d.primaryLabel;
+    if (d.primaryAria) b.setAttribute("aria-label", d.primaryAria);
     b.addEventListener("click", d.onPrimary);
     actions.appendChild(b);
   }
   if (d.secondaryLabel) {
     const b2 = document.createElement("button");
     b2.type = "button"; b2.className = "ghost"; b2.textContent = d.secondaryLabel;
+    if (d.secondaryAria) b2.setAttribute("aria-label", d.secondaryAria);
     b2.addEventListener("click", d.onSecondary);
     actions.appendChild(b2);
   }
@@ -768,6 +823,7 @@ function renderMissions() {
       const btn = document.createElement("button");
       btn.type = "button"; btn.className = "ghost"; btn.textContent = "持ち越す";
       btn.disabled = items.length >= 3;
+      btn.setAttribute("aria-label", `「${c.text}」を今週に持ち越す`);
       btn.addEventListener("click", () => {
         if (guideState.missions.items.length >= 3) return;
         guideState.missions.items.push({ id: uid(), text: c.text, done: false });
@@ -790,59 +846,73 @@ function renderMissions() {
     list.className = "mission-list";
     items.forEach(m => {
       const li = document.createElement("li");
+      // 行(ラベル)全体をタップ領域にする。✕ボタンは別要素にして間隔を確保し、誤タップで削除しないようにする。
+      const rowLabel = document.createElement("label");
+      rowLabel.className = "mission-row-label";
       const cb = document.createElement("input");
       cb.type = "checkbox"; cb.checked = !!m.done;
-      cb.setAttribute("aria-label", m.text + " を完了");
+      cb.setAttribute("aria-label", `ミッション「${m.text}」を完了`);
       cb.addEventListener("change", () => { m.done = cb.checked; saveGuideState(); renderAll(); });
       const name = document.createElement("span");
       name.className = "mission-text" + (m.done ? " done-today" : "");
       name.textContent = m.text;
+      rowLabel.append(cb, name);
       const del = document.createElement("button");
       del.type = "button"; del.className = "del-x"; del.textContent = "✕";
-      del.setAttribute("aria-label", m.text + " を削除");
+      del.setAttribute("aria-label", `ミッション「${m.text}」を削除`);
       del.addEventListener("click", () => {
         guideState.missions.items = guideState.missions.items.filter(x => x.id !== m.id);
         saveGuideState(); renderAll();
       });
-      li.append(cb, name, del);
+      li.append(rowLabel, del);
       list.appendChild(li);
     });
     body.appendChild(list);
   }
 
-  if (items.length < 3) {
-    const addWrap = document.createElement("div");
-    const chips = document.createElement("div");
-    chips.className = "mission-templates";
-    MISSION_TEMPLATES.forEach(t => {
-      const chip = document.createElement("button");
-      chip.type = "button"; chip.className = "tg-chip"; chip.textContent = t;
-      chip.disabled = guideState.missions.items.length >= 3;
-      chip.addEventListener("click", () => {
-        if (guideState.missions.items.length >= 3) return;
-        guideState.missions.items.push({ id: uid(), text: t, done: false });
-        saveGuideState(); renderAll();
-      });
-      chips.appendChild(chip);
-    });
-    addWrap.appendChild(chips);
-    const form = document.createElement("form");
-    form.className = "habit-add";
-    const input = document.createElement("input");
-    input.type = "text"; input.placeholder = "自由に入力(例: 副業の提案を1件送る)"; input.maxLength = 100;
-    const btn = document.createElement("button");
-    btn.type = "submit"; btn.className = "primary"; btn.textContent = "追加";
-    form.append(input, btn);
-    form.addEventListener("submit", e => {
-      e.preventDefault();
-      const text = input.value.trim();
-      if (!text || guideState.missions.items.length >= 3) return;
-      guideState.missions.items.push({ id: uid(), text, done: false });
+  // テンプレ・自由入力は常に描画する。3件に達したら押せない理由を言葉で伝える(押せないだけにしない)。
+  const full = guideState.missions.items.length >= 3;
+  const addWrap = document.createElement("div");
+  if (full) {
+    const limitMsg = document.createElement("div");
+    limitMsg.className = "mission-limit-msg";
+    limitMsg.textContent = "今週は3つまで。まず1つ終わらせよう";
+    addWrap.appendChild(limitMsg);
+  }
+  const chips = document.createElement("div");
+  chips.className = "mission-templates";
+  MISSION_TEMPLATES.forEach(t => {
+    const chip = document.createElement("button");
+    chip.type = "button"; chip.className = "tg-chip"; chip.textContent = t;
+    chip.disabled = full;
+    chip.setAttribute("aria-label", `テンプレート「${t}」を今週のミッションに追加`);
+    chip.addEventListener("click", () => {
+      if (guideState.missions.items.length >= 3) return;
+      guideState.missions.items.push({ id: uid(), text: t, done: false });
       saveGuideState(); renderAll();
     });
-    addWrap.appendChild(form);
-    body.appendChild(addWrap);
-  }
+    chips.appendChild(chip);
+  });
+  addWrap.appendChild(chips);
+  const form = document.createElement("form");
+  form.className = "habit-add";
+  const input = document.createElement("input");
+  input.type = "text"; input.id = "mission-input";
+  input.placeholder = "自由に入力(例: 副業の提案を1件送る)"; input.maxLength = 100;
+  input.disabled = full;
+  const btn = document.createElement("button");
+  btn.type = "submit"; btn.className = "primary"; btn.textContent = "追加";
+  btn.disabled = full;
+  form.append(input, btn);
+  form.addEventListener("submit", e => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text || guideState.missions.items.length >= 3) return;
+    guideState.missions.items.push({ id: uid(), text, done: false });
+    saveGuideState(); renderAll();
+  });
+  addWrap.appendChild(form);
+  body.appendChild(addWrap);
 }
 
 /* ============================================================
@@ -894,6 +964,8 @@ function renderClose() {
       b.type = "button";
       b.className = "toggle-btn" + (draft[key] === val ? " active" : "");
       b.textContent = t;
+      b.setAttribute("aria-label", `${text} ${t}`);
+      b.setAttribute("aria-pressed", String(draft[key] === val));
       b.addEventListener("click", () => { draft[key] = val; renderClose(); });
       row.appendChild(b);
     });
@@ -919,6 +991,7 @@ function renderClose() {
   saveBtn.type = "button"; saveBtn.className = "primary";
   saveBtn.style.marginTop = "12px";
   saveBtn.textContent = draft.saved ? "更新する" : "保存する";
+  saveBtn.setAttribute("aria-label", draft.saved ? "夜の締めを更新する" : "夜の締めを保存する");
   saveBtn.addEventListener("click", () => {
     if (draft.progress === null || draft.waste === null) {
       draft.errorMsg = "「前進した?」「無駄遣いした?」に、はい/いいえで答えてから保存しよう。";
@@ -1043,6 +1116,14 @@ function renderAll() {
 rolloverMissionsIfNeeded();
 renderAll();
 setInterval(renderAll, 60000); // 時間帯が変わったら指令も切り替わるように
+
+// 入力時の視界確保: テキスト入力にフォーカスしたら見える位置へスクロールする(モバイルのキーボード対策)
+document.addEventListener("focusin", e => {
+  const t = e.target;
+  if (t && t.tagName === "INPUT" && t.type === "text" && typeof t.scrollIntoView === "function") {
+    t.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+});
 
 /* 設定: データ入出力(自分のデータのみ) */
 $("export-btn").addEventListener("click", () => {
