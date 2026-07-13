@@ -885,7 +885,9 @@ function renderMissions() {
     const chip = document.createElement("button");
     chip.type = "button"; chip.className = "tg-chip"; chip.textContent = t;
     chip.disabled = full;
-    chip.setAttribute("aria-label", `テンプレート「${t}」を今週のミッションに追加`);
+    chip.setAttribute("aria-label", full
+      ? `テンプレート「${t}」を今週のミッションに追加(今週は3つまで。まず1つ終わらせよう)`
+      : `テンプレート「${t}」を今週のミッションに追加`);
     chip.addEventListener("click", () => {
       if (guideState.missions.items.length >= 3) return;
       guideState.missions.items.push({ id: uid(), text: t, done: false });
@@ -1118,12 +1120,19 @@ renderAll();
 setInterval(renderAll, 60000); // 時間帯が変わったら指令も切り替わるように
 
 // 入力時の視界確保: テキスト入力にフォーカスしたら見える位置へスクロールする(モバイルのキーボード対策)
-document.addEventListener("focusin", e => {
-  const t = e.target;
-  if (t && t.tagName === "INPUT" && t.type === "text" && typeof t.scrollIntoView === "function") {
-    t.scrollIntoView({ block: "center", behavior: "smooth" });
+// focusin だけだと「すでにフォーカス済みの要素への再タップ」で発火しない、
+// スクロール中に要素が再生成されて smooth スクロールが中断される等で2回目以降が不安定だったため、
+// click / touchstart でも同様にスクロールを試み、rAF 経由で確実にレイアウト確定後に実行する。
+function scrollTextInputIntoView(t) {
+  if (t && t.tagName === "INPUT" && t.type === "text" && !t.disabled && typeof t.scrollIntoView === "function") {
+    requestAnimationFrame(() => {
+      t.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
   }
-});
+}
+document.addEventListener("focusin", e => scrollTextInputIntoView(e.target));
+document.addEventListener("click", e => scrollTextInputIntoView(e.target));
+document.addEventListener("touchstart", e => scrollTextInputIntoView(e.target), { passive: true });
 
 /* 設定: データ入出力(自分のデータのみ) */
 $("export-btn").addEventListener("click", () => {
