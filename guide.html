@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#2a78d6">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<title>⚡ 導き — 100億コンパス</title>
+<style>
+  :root {
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --series-1: #2a78d6;
+    --series-2: #1baf7a;
+    --seq-100: #cde2fb;
+    --seq-450: #2a78d6;
+    --good: #006300;
+    --accent-wash: rgba(42,120,214,0.10);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-1: #1a1a19;
+      --page: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255,255,255,0.10);
+      --series-1: #3987e5;
+      --series-2: #199e70;
+      --seq-100: #184f95;
+      --seq-450: #3987e5;
+      --good: #0ca30c;
+      --accent-wash: rgba(57,135,229,0.14);
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+    background: var(--page);
+    color: var(--text-primary);
+    line-height: 1.6;
+    padding: 24px 16px 64px;
+  }
+  main { max-width: 720px; margin: 0 auto; }
+  header.app { margin-bottom: 16px; }
+  header.app h1 { font-size: 26px; font-weight: 700; letter-spacing: 0.01em; }
+  header.app p { color: var(--text-secondary); font-size: 14px; margin-top: 2px; }
+  header.app a { color: var(--series-1); font-weight: 600; text-decoration: none; }
+  header.app a:hover { text-decoration: underline; }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .card h2 { font-size: 15px; font-weight: 600; color: var(--text-secondary); margin-bottom: 14px; }
+  .card h2 .sub { font-weight: 400; color: var(--text-muted); font-size: 12px; margin-left: 8px; }
+
+  input, select, button {
+    font: inherit; color: var(--text-primary);
+    background: var(--page); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 10px; font-size: 14px;
+  }
+  input:focus, button:focus { outline: 2px solid var(--series-1); outline-offset: 1px; }
+  button.primary { background: var(--series-1); color: #fff; border-color: transparent; font-weight: 600; cursor: pointer; }
+  button.ghost { background: transparent; cursor: pointer; color: var(--text-secondary); }
+  button.ghost:hover { background: var(--accent-wash); }
+  button.del-x {
+    padding: 3px 10px; font-size: 14px; line-height: 1.4;
+    color: var(--text-muted); border: none; background: transparent;
+    border-radius: 8px; cursor: pointer;
+  }
+  button.del-x:hover { background: var(--accent-wash); color: var(--text-primary); }
+  .habit-empty { color: var(--text-muted); font-size: 13.5px; padding: 12px 0; }
+  .field { display: flex; flex-direction: column; gap: 3px; margin-top: 10px; }
+  .field label { font-size: 12px; color: var(--text-muted); }
+  .habit-add { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .habit-add input[type="text"] { flex: 1; min-width: 200px; }
+  .data-actions { display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+  .tg-chip {
+    display: inline-block; font-size: 12.5px; padding: 4px 12px; border-radius: 999px;
+    background: var(--accent-wash); color: var(--text-secondary); border: none; cursor: default;
+  }
+  button.tg-chip { cursor: pointer; }
+  button.tg-chip:disabled { opacity: 0.4; cursor: not-allowed; }
+  .meter { height: 8px; border-radius: 4px; background: var(--seq-100); overflow: hidden; }
+  .meter > span { display: block; height: 100%; border-radius: 4px; background: var(--seq-450); min-width: 2px; transition: width .4s ease; }
+
+  /* ---- 今の指令 ---- */
+  .directive-card { border: 2px solid var(--series-1); }
+  .directive-label { font-size: 12.5px; color: var(--text-muted); font-weight: 600; letter-spacing: 0.04em; margin-bottom: 6px; }
+  .directive-headline { font-size: 23px; font-weight: 700; line-height: 1.45; margin-bottom: 8px; }
+  .directive-sub { font-size: 13.5px; color: var(--text-secondary); margin-bottom: 16px; }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn-row button { padding: 10px 20px; font-size: 14.5px; }
+
+  /* ---- オラクル ---- */
+  .oracle-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
+  .oracle-btn {
+    background: var(--page); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 6px; font-size: 12.5px; text-align: center; cursor: pointer; line-height: 1.5;
+  }
+  .oracle-btn:hover { background: var(--accent-wash); }
+  #oracle-panel { margin-top: 14px; padding: 14px; border-radius: 10px; background: var(--page); border: 1px solid var(--border); }
+  .oracle-topic-label { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; font-weight: 600; }
+  .qa-question { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+  .qa-options { display: flex; gap: 8px; }
+  .verdict { font-size: 15px; font-weight: 600; line-height: 1.6; margin-bottom: 10px; }
+  .verdict.go { color: var(--good); }
+  .verdict.hold { color: var(--text-primary); }
+  .verdict.conditional { color: var(--series-1); }
+  #oracle-panel input[type="text"] { width: 100%; margin-bottom: 10px; }
+  #oracle-recent { margin-top: 12px; font-size: 12.5px; color: var(--text-secondary); }
+  .oracle-recent-heading { font-size: 11.5px; color: var(--text-muted); margin-bottom: 4px; }
+  .oracle-recent-row { padding: 2px 0; }
+
+  /* ---- ミッション ---- */
+  .mission-carry { background: var(--accent-wash); border-radius: 8px; padding: 10px; margin-bottom: 12px; }
+  .mission-carry-label { font-size: 12.5px; color: var(--text-secondary); margin-bottom: 6px; }
+  .mission-carry-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; font-size: 13.5px; }
+  ul.mission-list { list-style: none; }
+  ul.mission-list li { display: flex; align-items: center; gap: 10px; padding: 10px 2px; border-bottom: 1px solid var(--grid); }
+  ul.mission-list li:last-child { border-bottom: none; }
+  ul.mission-list input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--series-1); cursor: pointer; flex: none; }
+  .mission-text { flex: 1; font-size: 15px; }
+  .mission-text.done-today { color: var(--text-muted); text-decoration: line-through; }
+  .mission-templates { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+
+  /* ---- 夜の締め ---- */
+  .close-date-label { font-size: 13px; color: var(--text-muted); margin-bottom: 10px; }
+  .close-toggle-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .close-toggle-label { flex: 1; min-width: 120px; font-size: 14.5px; }
+  button.toggle-btn { padding: 6px 16px; }
+  button.toggle-btn.active { background: var(--series-1); color: #fff; border-color: transparent; font-weight: 600; }
+  .close-comment { margin-top: 12px; font-size: 14px; font-weight: 600; color: var(--text-secondary); }
+
+  /* ---- 規律スコア ---- */
+  .score-value { font-size: 40px; font-weight: 700; line-height: 1.2; }
+  .score-label { font-size: 15px; color: var(--text-secondary); margin-bottom: 10px; }
+  .score-meter { height: 14px; }
+  .score-detail { margin-top: 10px; font-size: 12.5px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 3px; }
+
+  footer.app { color: var(--text-muted); font-size: 12px; text-align: center; margin-top: 32px; }
+</style>
+</head>
+<body>
+<main>
+  <header class="app">
+    <h1>⚡ 導き</h1>
+    <p>迷うな。今日、これをやれ。</p>
+    <p style="margin-top:6px"><a href="./index.html">🧭 コンパスへ</a></p>
+  </header>
+
+  <!-- 1. 今の指令 -->
+  <section class="card directive-card" id="directive-card">
+    <div class="directive-label">今の指令</div>
+    <div class="directive-headline" id="directive-headline"></div>
+    <div class="directive-sub" id="directive-sub"></div>
+    <div class="btn-row" id="directive-actions"></div>
+  </section>
+
+  <!-- 2. 迷ったら聞け -->
+  <section class="card">
+    <h2>迷ったら聞け<span class="sub">タップして即裁定</span></h2>
+    <div class="oracle-grid">
+      <button type="button" class="oracle-btn" data-topic="spend">💸<br>金を使いたい</button>
+      <button type="button" class="oracle-btn" data-topic="skip">🛋<br>サボりたい</button>
+      <button type="button" class="oracle-btn" data-topic="anxious">😰<br>不安だ</button>
+      <button type="button" class="oracle-btn" data-topic="invest">💡<br>儲け話が来た</button>
+      <button type="button" class="oracle-btn" data-topic="tired">🔥<br>疲れた</button>
+    </div>
+    <div id="oracle-panel" hidden></div>
+    <div id="oracle-recent"></div>
+  </section>
+
+  <!-- 3. 今週の3ミッション -->
+  <section class="card">
+    <h2>今週の3ミッション<span class="sub" id="missions-week-label"></span></h2>
+    <div id="missions-prev"></div>
+    <div id="missions-body"></div>
+  </section>
+
+  <!-- 4. 夜の締め -->
+  <section class="card" id="close-card">
+    <h2>夜の締め<span class="sub">3タップで終わる</span></h2>
+    <div id="close-body"></div>
+  </section>
+
+  <!-- 5. 規律スコア -->
+  <section class="card">
+    <h2>規律スコア<span class="sub">直近14日間</span></h2>
+    <div id="score-body"></div>
+  </section>
+
+  <!-- 設定 -->
+  <section class="card">
+    <h2>設定とデータ</h2>
+    <div class="data-actions">
+      <button class="ghost" type="button" id="export-btn">データを書き出す(JSON)</button>
+      <button class="ghost" type="button" id="import-btn">データを読み込む</button>
+      <input type="file" id="import-file" accept="application/json" hidden>
+    </div>
+  </section>
+
+  <footer class="app">「導き」のデータはこの端末の中だけに保存されます。コンパスのデータは読み取り専用で参照するだけで、書き換えることはありません。</footer>
+</main>
+
+<script>
+"use strict";
+/* ============================================================
+   導き — 状態管理
+   ============================================================ */
+const STORE_KEY = "michibiki:v1";
+const COMPASS_KEY = "hyakuoku-compass:v1"; // 読み取り専用。絶対に書き込まない。
+const INVEST_START = 1e6; // コンパスと同じ: 100万円未満は貯蓄フェーズ
+
+const $ = id => document.getElementById(id);
+
+function todayStr(d = new Date()) {
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+function fmtDate(dstr) {
+  const [y, m, dd] = dstr.split("-").map(Number);
+  return `${y}年${m}月${dd}日`;
+}
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+function fmtYen(v) {
+  if (!isFinite(v)) return "—";
+  v = Math.round(v);
+  const neg = v < 0; v = Math.abs(v);
+  const oku = Math.floor(v / 1e8);
+  const man = Math.floor((v % 1e8) / 1e4);
+  const en = v % 1e4;
+  let s = "";
+  if (oku) s += oku.toLocaleString("ja-JP") + "億";
+  if (man) s += man.toLocaleString("ja-JP") + "万";
+  if (!oku && !man) s += en.toLocaleString("ja-JP");
+  else if (en && !oku) s += en.toLocaleString("ja-JP");
+  return (neg ? "-" : "") + s + "円";
+}
+
+// ISO週(月曜開始)キー "YYYY-Wnn"
+function isoWeekKey(now = new Date()) {
+  const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  const dayNum = (d.getUTCDay() + 6) % 7; // 月=0 ... 日=6
+  d.setUTCDate(d.getUTCDate() - dayNum + 3); // その週の木曜日
+  const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  const firstDayNum = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNum + 3);
+  const weekNum = 1 + Math.round((d - firstThursday) / (7 * 86400000));
+  return `${d.getUTCFullYear()}-W${String(weekNum).padStart(2, "0")}`;
+}
+function weekKeyLabel(wk) {
+  if (!wk) return "";
+  const m = /^(\d{4})-W(\d{2})$/.exec(wk);
+  return m ? `${m[1]}年 第${parseInt(m[2], 10)}週` : wk;
+}
+
+// 夜(18:00〜翌5:00)は日付をまたぐため、0〜5時台は「前日の夜」として扱う
+function nightKeyDate(now = new Date()) {
+  const d = new Date(now);
+  if (d.getHours() < 5) d.setDate(d.getDate() - 1);
+  return todayStr(d);
+}
+
+/* ============================================================
+   コンパスのデータ(読み取り専用)
+   ============================================================ */
+function readCompass() {
+  try {
+    const raw = localStorage.getItem(COMPASS_KEY);
+    if (!raw) return { records: [], habits: [], opens: {} };
+    const parsed = JSON.parse(raw) || {};
+    return {
+      records: Array.isArray(parsed.records)
+        ? parsed.records.filter(r => r && typeof r.d === "string" && typeof r.v === "number")
+        : [],
+      habits: Array.isArray(parsed.habits)
+        ? parsed.habits.filter(h => h && typeof h.id === "string" && typeof h.name === "string" && h.done && typeof h.done === "object")
+        : [],
+      opens: (parsed.opens && typeof parsed.opens === "object") ? parsed.opens : {},
+    };
+  } catch (e) {
+    console.warn("コンパスデータの読み込みに失敗しました", e);
+    return { records: [], habits: [], opens: {} };
+  }
+}
+function sortedRecords(compass) {
+  return compass.records.slice().sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0));
+}
+function habitsToday(compass) {
+  const today = todayStr();
+  const total = compass.habits.length;
+  const done = compass.habits.filter(h => h.done[today]).length;
+  const firstUndone = compass.habits.find(h => !h.done[today]);
+  return { total, done, allDone: total > 0 && done === total, firstUndone };
+}
+function openStreakCompass(compass) {
+  let s = 0;
+  const d = new Date();
+  while (compass.opens[todayStr(d)]) { s++; d.setDate(d.getDate() - 1); }
+  return s;
+}
+
+/* ============================================================
+   導き自身のデータ(michibiki:v1)
+   ============================================================ */
+function defaultGuideState() {
+  return {
+    missions: { weekKey: null, items: [], prevWeekKey: null, prevRate: null, carryCandidates: [] },
+    closes: {},     // { "YYYY-MM-DD": { progress, waste, firstMove } }
+    oracleLog: [],  // { d, topic, verdict } 直近50件
+    consumed: {},   // { "YYYY-MM-DD": { done: [id], skipped: [id] } }
+  };
+}
+function migrateGuideState(parsed) {
+  const s = defaultGuideState();
+  if (!parsed || typeof parsed !== "object") return s;
+  if (parsed.missions && typeof parsed.missions === "object") {
+    s.missions.weekKey = typeof parsed.missions.weekKey === "string" ? parsed.missions.weekKey : null;
+    s.missions.items = Array.isArray(parsed.missions.items)
+      ? parsed.missions.items
+          .filter(i => i && typeof i.id === "string" && typeof i.text === "string")
+          .slice(0, 3)
+          .map(i => ({ id: i.id, text: String(i.text).slice(0, 100), done: !!i.done }))
+      : [];
+    s.missions.prevWeekKey = typeof parsed.missions.prevWeekKey === "string" ? parsed.missions.prevWeekKey : null;
+    s.missions.prevRate = typeof parsed.missions.prevRate === "number" ? parsed.missions.prevRate : null;
+    s.missions.carryCandidates = Array.isArray(parsed.missions.carryCandidates)
+      ? parsed.missions.carryCandidates
+          .filter(c => c && typeof c.text === "string")
+          .map(c => ({ id: typeof c.id === "string" ? c.id : uid(), text: String(c.text).slice(0, 100) }))
+      : [];
+  }
+  if (parsed.closes && typeof parsed.closes === "object") {
+    Object.keys(parsed.closes).forEach(k => {
+      const c = parsed.closes[k];
+      if (c && typeof c === "object" && /^\d{4}-\d{2}-\d{2}$/.test(k)) {
+        s.closes[k] = {
+          progress: !!c.progress,
+          waste: !!c.waste,
+          firstMove: typeof c.firstMove === "string" ? c.firstMove.slice(0, 200) : "",
+        };
+      }
+    });
+  }
+  if (Array.isArray(parsed.oracleLog)) {
+    s.oracleLog = parsed.oracleLog
+      .filter(o => o && typeof o === "object")
+      .map(o => ({ d: String(o.d || ""), topic: String(o.topic || ""), verdict: String(o.verdict || "").slice(0, 300) }))
+      .slice(-50);
+  }
+  if (parsed.consumed && typeof parsed.consumed === "object") {
+    Object.keys(parsed.consumed).forEach(k => {
+      const c = parsed.consumed[k];
+      if (c && typeof c === "object" && /^\d{4}-\d{2}-\d{2}$/.test(k)) {
+        s.consumed[k] = {
+          done: Array.isArray(c.done) ? c.done.filter(x => typeof x === "string") : [],
+          skipped: Array.isArray(c.skipped) ? c.skipped.filter(x => typeof x === "string") : [],
+        };
+      }
+    });
+  }
+  return s;
+}
+function loadGuideState() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return defaultGuideState();
+    return migrateGuideState(JSON.parse(raw));
+  } catch (e) {
+    console.warn("導きデータの読み込みに失敗しました", e);
+    return defaultGuideState();
+  }
+}
+function saveGuideState() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(guideState)); }
+  catch (e) { console.warn("導きデータの保存に失敗しました", e); }
+}
+
+let guideState = loadGuideState();
+
+function rolloverMissionsIfNeeded() {
+  const wk = isoWeekKey();
+  if (guideState.missions.weekKey === wk) return;
+  const hadPrev = guideState.missions.weekKey !== null;
+  const prevItems = guideState.missions.items || [];
+  const prevRate = (hadPrev && prevItems.length) ? prevItems.filter(i => i.done).length / prevItems.length : null;
+  guideState.missions = {
+    weekKey: wk,
+    items: [],
+    prevWeekKey: hadPrev ? guideState.missions.weekKey : null,
+    prevRate: hadPrev ? prevRate : null,
+    carryCandidates: prevItems.filter(i => !i.done).map(i => ({ id: uid(), text: i.text })),
+  };
+  saveGuideState();
+}
+
+function markConsumed(id, kind) {
+  const today = todayStr();
+  if (!guideState.consumed[today]) guideState.consumed[today] = { done: [], skipped: [] };
+  const bucket = guideState.consumed[today][kind];
+  if (!bucket.includes(id)) bucket.push(id);
+  saveGuideState();
+}
+
+/* ============================================================
+   1. 指令エンジン
+   ============================================================ */
+function directiveHabit(h) {
+  const id = "habit:" + h.id;
+  return {
+    headline: `まず「${h.name}」を片付けろ。3分で終わる。`,
+    sub: "今日の行動リストから選んだ、いちばん効く1つ。",
+    primaryLabel: "✔ やった",
+    onPrimary: () => { markConsumed(id, "done"); renderAll(); },
+    secondaryLabel: "あとで",
+    onSecondary: () => { markConsumed(id, "skipped"); renderAll(); },
+  };
+}
+function directiveMission(m) {
+  return {
+    headline: `今週のミッション「${m.text}」を進めろ。`,
+    sub: "今週決めた3つのうちの1つ。",
+    primaryLabel: "✔ やった",
+    onPrimary: () => { m.done = true; saveGuideState(); renderAll(); },
+    secondaryLabel: "あとで",
+    onSecondary: () => { markConsumed("mission:" + m.id, "skipped"); renderAll(); },
+  };
+}
+function directiveFirstMove(text, id) {
+  return {
+    headline: `まず「${text}」をやれ。決めたのは昨日の自分だ。`,
+    sub: "前夜の締めで決めた、今日の最初の一手。",
+    primaryLabel: "✔ やった",
+    onPrimary: () => { markConsumed(id, "done"); renderAll(); },
+    secondaryLabel: "あとで",
+    onSecondary: () => { markConsumed(id, "skipped"); renderAll(); },
+  };
+}
+function directiveNightClose() {
+  return {
+    headline: "今日の振り返りをつけろ。3タップで終わる。",
+    sub: "夜の締めがまだだ。下の「夜の締め」から。",
+    primaryLabel: "夜の締めへ",
+    onPrimary: () => {
+      const el = $("close-card");
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    },
+  };
+}
+function directiveNightDone(nc) {
+  return {
+    headline: nc.firstMove
+      ? `今日は店じまい。明日の最初の一手: 「${nc.firstMove}」`
+      : "今日は店じまい。よくやった。",
+    sub: "お疲れ。今日はここまででいい。",
+  };
+}
+function directiveAllDone() {
+  return { headline: "全部終わってる。今日は勝ちだ。", sub: "この調子で明日も。" };
+}
+
+function pickDirective() {
+  const now = new Date();
+  const hour = now.getHours();
+  const today = todayStr(now);
+  const compass = readCompass();
+  const consumedToday = guideState.consumed[today] || { done: [], skipped: [] };
+  const blocked = new Set([...consumedToday.done, ...consumedToday.skipped]);
+
+  const undoneHabits = compass.habits.filter(h => !h.done[today] && !blocked.has("habit:" + h.id));
+  const undoneMissions = (guideState.missions.items || []).filter(m => !m.done && !blocked.has("mission:" + m.id));
+
+  const yesterday = todayStr(new Date(now.getTime() - 86400000));
+  const yClose = guideState.closes[yesterday];
+  const firstMoveId = "firstmove:" + today;
+  const hasFirstMove = !!(yClose && yClose.firstMove && !blocked.has(firstMoveId));
+
+  let phase = "night";
+  if (hour >= 5 && hour < 11) phase = "morning";
+  else if (hour >= 11 && hour < 18) phase = "afternoon";
+
+  if (phase === "morning") {
+    if (hasFirstMove) return directiveFirstMove(yClose.firstMove, firstMoveId);
+    if (undoneHabits.length) return directiveHabit(undoneHabits[0]);
+    if (undoneMissions.length) return directiveMission(undoneMissions[0]);
+  } else if (phase === "afternoon") {
+    if (undoneMissions.length) return directiveMission(undoneMissions[0]);
+    if (undoneHabits.length) return directiveHabit(undoneHabits[0]);
+  } else {
+    const nightDate = nightKeyDate(now);
+    const nc = guideState.closes[nightDate];
+    const closed = nc && typeof nc.progress === "boolean" && typeof nc.waste === "boolean";
+    return closed ? directiveNightDone(nc) : directiveNightClose();
+  }
+  return directiveAllDone();
+}
+
+function renderDirective() {
+  const d = pickDirective();
+  $("directive-headline").textContent = d.headline;
+  $("directive-sub").textContent = d.sub || "";
+  const actions = $("directive-actions");
+  actions.innerHTML = "";
+  if (d.primaryLabel) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "primary"; b.textContent = d.primaryLabel;
+    b.addEventListener("click", d.onPrimary);
+    actions.appendChild(b);
+  }
+  if (d.secondaryLabel) {
+    const b2 = document.createElement("button");
+    b2.type = "button"; b2.className = "ghost"; b2.textContent = d.secondaryLabel;
+    b2.addEventListener("click", d.onSecondary);
+    actions.appendChild(b2);
+  }
+}
+
+/* ============================================================
+   2. 迷ったら聞け(判断オラクル)
+   ============================================================ */
+const ORACLE_TOPICS = {
+  spend: { label: "金を使いたい" },
+  skip: { label: "サボりたい" },
+  anxious: { label: "不安だ" },
+  invest: { label: "儲け話が来た" },
+  tired: { label: "疲れた" },
+};
+
+function oracleFacts() {
+  const compass = readCompass();
+  const sorted = sortedRecords(compass);
+  const last = sorted.length ? sorted[sorted.length - 1] : null;
+  const prev = sorted.length >= 2 ? sorted[sorted.length - 2] : null;
+  const assets = last ? last.v : 0;
+  const hInfo = habitsToday(compass);
+  const streak = openStreakCompass(compass);
+
+  let assetsFact;
+  if (!last) assetsFact = "まだ資産の記録がない";
+  else if (prev) {
+    const diff = last.v - prev.v;
+    assetsFact = diff >= 0 ? `前回比 +${fmtYen(diff)}(減っていない)` : `前回比 -${fmtYen(Math.abs(diff))}`;
+  } else {
+    assetsFact = `現在の記録 ${fmtYen(last.v)}`;
+  }
+  const streakFact = streak > 0 ? `開いた記録 ${streak}日連続` : "今日また開いた。ここからだ";
+
+  return {
+    assets, assetsFact, streakFact,
+    allDone: hInfo.allDone,
+    firstUndoneName: hInfo.firstUndone ? hInfo.firstUndone.name : null,
+  };
+}
+
+function buildOracleTree(topic, facts) {
+  switch (topic) {
+    case "spend":
+      return {
+        q: "生活に必要な支出か?(家賃・食費・医療など)",
+        yes: { verdict: "GO", text: "GO。生存必需は削るな。" },
+        no: facts.assets < INVEST_START
+          ? { verdict: "見送り", text: "見送り。貯蓄フェーズ中(資産100万円未満)は生存必需以外は原則ナシ。100万円まで走り切れ。" }
+          : {
+              q: "今月の余剰資金(使っても計画が崩れない範囲)内か?",
+              yes: { verdict: "条件付きGO", text: "条件付きGO。使っていい。ただし今日中に金額を記録しろ。" },
+              no: { verdict: "見送り", text: "見送り。余剰の外は出すな。欲しいなら稼げ。" },
+            },
+      };
+    case "skip":
+      return {
+        q: "気晴らしのあと、ちゃんと戻ってこれる?",
+        yes: facts.allDone
+          ? { verdict: "GO", text: "サボってよし。それは回復だ。今日の分はもう終わっている。" }
+          : { verdict: "条件付きGO", text: `休め。ただし戻ったら「${facts.firstUndoneName || "残りの1つ"}」だけ3分やれ。` },
+        no: { verdict: "見送り", text: "戻れる自信がないなら今やれ。3分だけでいい。今すぐ動け。" },
+      };
+    case "anxious":
+      return {
+        q: "不安の中身は『お金の数字』が中心?",
+        yes: { verdict: "GO", text: `事実: ${facts.assetsFact}。数字は前に進んでいる。今できる最小の一手は「資産か家計をひとつ記録する」ことだ。` },
+        no: { verdict: "GO", text: `事実: ${facts.streakFact}。積み重ねは止まっていない。今できる最小の一手は「今日の行動をひとつ片付ける」ことだ。` },
+      };
+    case "invest":
+      return {
+        q: "元本保証・すぐ儲かるという触れ込みか?",
+        yes: { verdict: "見送り", text: "見送り。即決を迫る/元本保証を謳う話にロクなものはない。" },
+        no: {
+          q: "契約・送金を今日中に求められているか?",
+          yes: { verdict: "見送り", text: "見送り。『今日中』を強制する話は罠だ。急がせる話に良い話はない。" },
+          no: facts.assets < INVEST_START
+            ? { verdict: "見送り", text: "見送り。貯蓄フェーズ中(資産100万円未満)は本業と貯蓄以外に手を出すな。" }
+            : { verdict: "条件付きGO", text: "条件付きGO。1週間寝かせろ。それでも欲しければ、余剰資金の範囲だけで検討していい。" },
+        },
+      };
+    case "tired":
+      return {
+        verdict: "GO", text: "GO。休め。それは甘えじゃない。",
+        requireInput: true, inputLabel: "じゃあ、明日の最初の一手だけ今決めろ",
+      };
+    default:
+      return { verdict: "見送り", text: "不明な項目です。" };
+  }
+}
+
+let oracleSession = null;
+
+function openOracle(topic) {
+  oracleSession = { topic, node: buildOracleTree(topic, oracleFacts()), logged: false };
+  renderOracle();
+}
+function oracleAnswer(bool) {
+  if (!oracleSession || !oracleSession.node.q) return;
+  oracleSession.node = bool ? oracleSession.node.yes : oracleSession.node.no;
+  renderOracle();
+}
+function logOracleVerdict(topic, text) {
+  guideState.oracleLog.push({ d: todayStr(), topic, verdict: text });
+  if (guideState.oracleLog.length > 50) guideState.oracleLog = guideState.oracleLog.slice(-50);
+  saveGuideState();
+}
+function closeOracle() {
+  oracleSession = null;
+  renderOracle();
+}
+function renderOracle() {
+  const panel = $("oracle-panel");
+  panel.innerHTML = "";
+  if (!oracleSession) { panel.hidden = true; return; }
+  panel.hidden = false;
+  const node = oracleSession.node;
+
+  const title = document.createElement("div");
+  title.className = "oracle-topic-label";
+  title.textContent = ORACLE_TOPICS[oracleSession.topic] ? ORACLE_TOPICS[oracleSession.topic].label : oracleSession.topic;
+  panel.appendChild(title);
+
+  if (node.q) {
+    const q = document.createElement("div");
+    q.className = "qa-question";
+    q.textContent = node.q;
+    panel.appendChild(q);
+    const opts = document.createElement("div");
+    opts.className = "qa-options";
+    const yesBtn = document.createElement("button");
+    yesBtn.type = "button"; yesBtn.className = "primary"; yesBtn.textContent = "はい";
+    yesBtn.addEventListener("click", () => oracleAnswer(true));
+    const noBtn = document.createElement("button");
+    noBtn.type = "button"; noBtn.className = "ghost"; noBtn.textContent = "いいえ";
+    noBtn.addEventListener("click", () => oracleAnswer(false));
+    opts.append(yesBtn, noBtn);
+    panel.appendChild(opts);
+    return;
+  }
+
+  // 終端(裁定)
+  if (!oracleSession.logged && !node.requireInput) {
+    logOracleVerdict(oracleSession.topic, node.text);
+    oracleSession.logged = true;
+    renderOracleRecent();
+  }
+  const v = document.createElement("div");
+  v.className = "verdict " + (node.verdict === "GO" ? "go" : node.verdict === "見送り" ? "hold" : "conditional");
+  v.textContent = node.verdict + " — " + node.text;
+  panel.appendChild(v);
+
+  if (node.requireInput) {
+    const label = document.createElement("div");
+    label.className = "qa-question";
+    label.textContent = node.inputLabel;
+    panel.appendChild(label);
+    const input = document.createElement("input");
+    input.type = "text"; input.placeholder = "例: メールを1通返す"; input.maxLength = 200;
+    panel.appendChild(input);
+    const submit = document.createElement("button");
+    submit.type = "button"; submit.className = "primary"; submit.textContent = "決めた";
+    submit.addEventListener("click", () => {
+      const text = input.value.trim();
+      if (!text) { input.focus(); return; }
+      const dateKey = nightKeyDate(new Date());
+      const existing = guideState.closes[dateKey] || { progress: false, waste: false, firstMove: "" };
+      existing.firstMove = text;
+      guideState.closes[dateKey] = existing;
+      logOracleVerdict(oracleSession.topic, node.text + `(明日の最初の一手: ${text})`);
+      saveGuideState();
+      oracleSession = null;
+      closeDraft = null;
+      renderAll();
+    });
+    panel.appendChild(submit);
+  } else {
+    const close = document.createElement("button");
+    close.type = "button"; close.className = "ghost"; close.textContent = "閉じる";
+    close.addEventListener("click", () => { closeOracle(); renderAll(); });
+    panel.appendChild(close);
+  }
+}
+function renderOracleRecent() {
+  const wrap = $("oracle-recent");
+  wrap.innerHTML = "";
+  const recent = guideState.oracleLog.slice(-3).reverse();
+  if (!recent.length) return;
+  const heading = document.createElement("div");
+  heading.className = "oracle-recent-heading";
+  heading.textContent = "直近の裁定";
+  wrap.appendChild(heading);
+  recent.forEach(o => {
+    const row = document.createElement("div");
+    row.className = "oracle-recent-row";
+    const topicLabel = ORACLE_TOPICS[o.topic] ? ORACLE_TOPICS[o.topic].label : o.topic;
+    row.textContent = `${o.d} ・ ${topicLabel} ・ ${o.verdict}`;
+    wrap.appendChild(row);
+  });
+}
+document.querySelectorAll(".oracle-btn").forEach(b => {
+  b.addEventListener("click", () => openOracle(b.dataset.topic));
+});
+
+/* ============================================================
+   3. 今週の3ミッション
+   ============================================================ */
+const MISSION_TEMPLATES = ["資産を記録する", "積立を実行する", "出費を見直す", "本業で成果を1つ"];
+
+function renderMissions() {
+  $("missions-week-label").textContent = weekKeyLabel(guideState.missions.weekKey);
+
+  const prevWrap = $("missions-prev");
+  prevWrap.innerHTML = "";
+  if (guideState.missions.prevRate != null) {
+    const chip = document.createElement("span");
+    chip.className = "tg-chip";
+    chip.textContent = `前週の完了率 ${Math.round(guideState.missions.prevRate * 100)}%`;
+    prevWrap.appendChild(chip);
+  }
+
+  const body = $("missions-body");
+  body.innerHTML = "";
+  const items = guideState.missions.items;
+
+  if (guideState.missions.carryCandidates.length) {
+    const carryWrap = document.createElement("div");
+    carryWrap.className = "mission-carry";
+    const label = document.createElement("div");
+    label.className = "mission-carry-label";
+    label.textContent = "前週の未完了 — 持ち越す?";
+    carryWrap.appendChild(label);
+    guideState.missions.carryCandidates.forEach(c => {
+      const row = document.createElement("div");
+      row.className = "mission-carry-row";
+      const t = document.createElement("span");
+      t.textContent = c.text;
+      const btn = document.createElement("button");
+      btn.type = "button"; btn.className = "ghost"; btn.textContent = "持ち越す";
+      btn.disabled = items.length >= 3;
+      btn.addEventListener("click", () => {
+        if (guideState.missions.items.length >= 3) return;
+        guideState.missions.items.push({ id: uid(), text: c.text, done: false });
+        guideState.missions.carryCandidates = guideState.missions.carryCandidates.filter(x => x.id !== c.id);
+        saveGuideState(); renderAll();
+      });
+      row.append(t, btn);
+      carryWrap.appendChild(row);
+    });
+    body.appendChild(carryWrap);
+  }
+
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "habit-empty";
+    empty.textContent = "今週の3ミッションを設定しよう。テンプレから選ぶか、自由に入力を。";
+    body.appendChild(empty);
+  } else {
+    const list = document.createElement("ul");
+    list.className = "mission-list";
+    items.forEach(m => {
+      const li = document.createElement("li");
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.checked = !!m.done;
+      cb.setAttribute("aria-label", m.text + " を完了");
+      cb.addEventListener("change", () => { m.done = cb.checked; saveGuideState(); renderAll(); });
+      const name = document.createElement("span");
+      name.className = "mission-text" + (m.done ? " done-today" : "");
+      name.textContent = m.text;
+      const del = document.createElement("button");
+      del.type = "button"; del.className = "del-x"; del.textContent = "✕";
+      del.setAttribute("aria-label", m.text + " を削除");
+      del.addEventListener("click", () => {
+        guideState.missions.items = guideState.missions.items.filter(x => x.id !== m.id);
+        saveGuideState(); renderAll();
+      });
+      li.append(cb, name, del);
+      list.appendChild(li);
+    });
+    body.appendChild(list);
+  }
+
+  if (items.length < 3) {
+    const addWrap = document.createElement("div");
+    const chips = document.createElement("div");
+    chips.className = "mission-templates";
+    MISSION_TEMPLATES.forEach(t => {
+      const chip = document.createElement("button");
+      chip.type = "button"; chip.className = "tg-chip"; chip.textContent = t;
+      chip.disabled = guideState.missions.items.length >= 3;
+      chip.addEventListener("click", () => {
+        if (guideState.missions.items.length >= 3) return;
+        guideState.missions.items.push({ id: uid(), text: t, done: false });
+        saveGuideState(); renderAll();
+      });
+      chips.appendChild(chip);
+    });
+    addWrap.appendChild(chips);
+    const form = document.createElement("form");
+    form.className = "habit-add";
+    const input = document.createElement("input");
+    input.type = "text"; input.placeholder = "自由に入力(例: 副業の提案を1件送る)"; input.maxLength = 100;
+    const btn = document.createElement("button");
+    btn.type = "submit"; btn.className = "primary"; btn.textContent = "追加";
+    form.append(input, btn);
+    form.addEventListener("submit", e => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text || guideState.missions.items.length >= 3) return;
+      guideState.missions.items.push({ id: uid(), text, done: false });
+      saveGuideState(); renderAll();
+    });
+    addWrap.appendChild(form);
+    body.appendChild(addWrap);
+  }
+}
+
+/* ============================================================
+   4. 夜の締め
+   ============================================================ */
+let closeDraft = null;
+
+function ensureCloseDraft() {
+  const dateKey = nightKeyDate(new Date());
+  if (!closeDraft || closeDraft.date !== dateKey) {
+    const existing = guideState.closes[dateKey];
+    closeDraft = {
+      date: dateKey,
+      progress: existing ? existing.progress : null,
+      waste: existing ? existing.waste : null,
+      firstMove: existing ? (existing.firstMove || "") : "",
+      saved: !!existing,
+      errorMsg: "",
+      savedComment: "",
+    };
+  }
+  return closeDraft;
+}
+function closeComment(progress, waste) {
+  if (progress && !waste) return "完璧な一日。この積み重ねが100億を作る。";
+  if (progress && waste) return "前進はした。無駄遣いは次で断て。";
+  if (!progress && !waste) return "止まった日だけど、崩れてはいない。明日動け。";
+  return "今日はブレーキとアクセルを同時に踏んだ。切り替えろ。";
+}
+function renderClose() {
+  const draft = ensureCloseDraft();
+  const wrap = $("close-body");
+  wrap.innerHTML = "";
+
+  const label = document.createElement("div");
+  label.className = "close-date-label";
+  label.textContent = fmtDate(draft.date) + " の締め";
+  wrap.appendChild(label);
+
+  const toggleRow = (text, key) => {
+    const row = document.createElement("div");
+    row.className = "close-toggle-row";
+    const lab = document.createElement("span");
+    lab.className = "close-toggle-label";
+    lab.textContent = text;
+    row.appendChild(lab);
+    [["はい", true], ["いいえ", false]].forEach(([t, val]) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "toggle-btn" + (draft[key] === val ? " active" : "");
+      b.textContent = t;
+      b.addEventListener("click", () => { draft[key] = val; renderClose(); });
+      row.appendChild(b);
+    });
+    return row;
+  };
+  wrap.appendChild(toggleRow("前進した?", "progress"));
+  wrap.appendChild(toggleRow("無駄遣いした?", "waste"));
+
+  const fmField = document.createElement("div");
+  fmField.className = "field";
+  const fmLabel = document.createElement("label");
+  fmLabel.textContent = "明日の最初の一手";
+  fmLabel.setAttribute("for", "close-firstmove");
+  const fmInput = document.createElement("input");
+  fmInput.type = "text"; fmInput.id = "close-firstmove"; fmInput.maxLength = 200;
+  fmInput.value = draft.firstMove;
+  fmInput.placeholder = "例: メールを1通返す";
+  fmInput.addEventListener("input", () => { draft.firstMove = fmInput.value; });
+  fmField.append(fmLabel, fmInput);
+  wrap.appendChild(fmField);
+
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button"; saveBtn.className = "primary";
+  saveBtn.style.marginTop = "12px";
+  saveBtn.textContent = draft.saved ? "更新する" : "保存する";
+  saveBtn.addEventListener("click", () => {
+    if (draft.progress === null || draft.waste === null) {
+      draft.errorMsg = "「前進した?」「無駄遣いした?」に、はい/いいえで答えてから保存しよう。";
+      renderClose();
+      return;
+    }
+    draft.errorMsg = "";
+    guideState.closes[draft.date] = { progress: draft.progress, waste: draft.waste, firstMove: draft.firstMove.trim() };
+    draft.saved = true;
+    draft.savedComment = closeComment(draft.progress, draft.waste);
+    saveGuideState();
+    renderAll();
+  });
+  wrap.appendChild(saveBtn);
+
+  const commentEl = document.createElement("div");
+  commentEl.className = "close-comment";
+  commentEl.textContent = draft.errorMsg || draft.savedComment || "";
+  wrap.appendChild(commentEl);
+}
+
+/* ============================================================
+   5. 規律スコア
+   ============================================================ */
+function last14Dates() {
+  const arr = [];
+  const now = new Date();
+  for (let i = 13; i >= 0; i--) arr.push(todayStr(new Date(now.getTime() - i * 86400000)));
+  return arr;
+}
+function disciplineScore() {
+  const days = last14Dates();
+  const compass = readCompass();
+
+  const closeDays = days.filter(d => guideState.closes[d]);
+  const closeScore = (closeDays.length / days.length) * 40;
+
+  const progressDays = days.filter(d => guideState.closes[d] && guideState.closes[d].progress);
+  const progressScore = (progressDays.length / days.length) * 30;
+
+  let habitScore = null;
+  if (compass.habits.length) {
+    let sum = 0;
+    const total = compass.habits.length;
+    days.forEach(d => {
+      const done = compass.habits.filter(h => h.done[d]).length;
+      sum += done / total;
+    });
+    habitScore = (sum / days.length) * 30;
+  }
+
+  const maxTotal = 40 + 30 + (habitScore === null ? 0 : 30);
+  const rawTotal = closeScore + progressScore + (habitScore || 0);
+  const score = maxTotal > 0 ? Math.round((rawTotal / maxTotal) * 100) : 0;
+  return {
+    score,
+    closeScore: Math.round(closeScore),
+    progressScore: Math.round(progressScore),
+    habitScore: habitScore === null ? null : Math.round(habitScore),
+    habitAvailable: habitScore !== null,
+  };
+}
+function scoreLabel(score) {
+  if (score >= 90) return "鉄の規律";
+  if (score >= 70) return "上々";
+  if (score >= 50) return "まずまず";
+  return "立て直そう";
+}
+let scoreDetailOpen = false;
+function renderScore() {
+  const wrap = $("score-body");
+  wrap.innerHTML = "";
+  const r = disciplineScore();
+
+  const big = document.createElement("div");
+  big.className = "score-value";
+  big.textContent = r.score + " / 100";
+  const label = document.createElement("div");
+  label.className = "score-label";
+  label.textContent = scoreLabel(r.score);
+  const meter = document.createElement("div");
+  meter.className = "meter score-meter";
+  const bar = document.createElement("span");
+  bar.style.width = Math.max(0, Math.min(100, r.score)) + "%";
+  meter.appendChild(bar);
+  const toggle = document.createElement("button");
+  toggle.type = "button"; toggle.className = "ghost"; toggle.style.marginTop = "10px";
+  toggle.textContent = scoreDetailOpen ? "内訳を閉じる" : "内訳を見る";
+  toggle.addEventListener("click", () => { scoreDetailOpen = !scoreDetailOpen; renderScore(); });
+  wrap.append(big, label, meter, toggle);
+
+  if (scoreDetailOpen) {
+    const detail = document.createElement("div");
+    detail.className = "score-detail";
+    const lines = [
+      `夜の締め実施率: ${r.closeScore} / 40点`,
+      `前進日率: ${r.progressScore} / 30点`,
+      r.habitAvailable
+        ? `コンパス習慣消化率: ${r.habitScore} / 30点`
+        : "コンパス習慣消化率: 習慣が未登録のため対象外(他の項目で按分)",
+    ];
+    lines.forEach(t => {
+      const p = document.createElement("div");
+      p.textContent = t;
+      detail.appendChild(p);
+    });
+    wrap.appendChild(detail);
+  }
+}
+
+/* ============================================================
+   全体レンダリング / 初期化
+   ============================================================ */
+function renderAll() {
+  renderDirective();
+  renderOracleRecent();
+  renderMissions();
+  renderClose();
+  renderScore();
+}
+
+rolloverMissionsIfNeeded();
+renderAll();
+setInterval(renderAll, 60000); // 時間帯が変わったら指令も切り替わるように
+
+/* 設定: データ入出力(自分のデータのみ) */
+$("export-btn").addEventListener("click", () => {
+  try {
+    const blob = new Blob([JSON.stringify(guideState, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `michibiki-${todayStr()}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) { console.warn("書き出しに失敗しました", e); }
+});
+$("import-btn").addEventListener("click", () => $("import-file").click());
+$("import-file").addEventListener("change", () => {
+  const file = $("import-file").files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      if (!confirm("現在の「導き」データを読み込んだ内容で置き換えます。よろしいですか?")) return;
+      guideState = migrateGuideState(parsed);
+      saveGuideState();
+      closeDraft = null;
+      oracleSession = null;
+      renderAll();
+    } catch (err) {
+      alert("読み込みに失敗しました: " + err.message);
+    }
+    $("import-file").value = "";
+  };
+  reader.readAsText(file);
+});
+
+if ("serviceWorker" in navigator && location.protocol !== "file:") {
+  navigator.serviceWorker.register("./sw.js").catch(() => {});
+}
+</script>
+</body>
+</html>

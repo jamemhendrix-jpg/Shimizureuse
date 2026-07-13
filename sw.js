@@ -1,8 +1,8 @@
 /* 100億コンパス — Service Worker
    オフラインキャッシュ + 毎日リマインド通知(Periodic Background Sync) */
 "use strict";
-const CACHE = "hyakuoku-compass-v1";
-const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
+const CACHE = "hyakuoku-compass-v2";
+const ASSETS = ["./", "./index.html", "./guide.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
