@@ -1261,11 +1261,43 @@ function fallbackCopyToClipboard(text) {
   } catch (e) { console.warn("コピーに失敗しました", e); return false; }
 }
 // 成功/失敗をボタンのフィードバック表示に使うため、Promise<boolean> で結果を返す。
+// どんな環境(権限拒否・API不在・同期例外・Promiseが永遠に解決しない等)でも
+// 必ず一定時間内に解決し、呼び出し側が確実にフィードバックを出せるようにする。
 function copyPromptToClipboard(text) {
-  if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
-    return navigator.clipboard.writeText(text).then(() => true).catch(() => fallbackCopyToClipboard(text));
-  }
-  return Promise.resolve(fallbackCopyToClipboard(text));
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      resolve(!!ok);
+    };
+
+    // Clipboard API が resolve も reject もせずハングしたままになる環境
+    // (一部のヘッドレス/サンドボックス環境で発生しうる)への保険として、
+    // 一定時間で強制的にフォールバックへ切り替える。
+    const timer = setTimeout(() => finish(fallbackCopyToClipboard(text)), 800);
+
+    let writePromise = null;
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+        // 実装によっては reject する Promise ではなく同期的に例外を投げてくる
+        // ことがあるため、呼び出し自体を try/catch で保護する。
+        writePromise = navigator.clipboard.writeText(text);
+      }
+    } catch (e) {
+      writePromise = null;
+    }
+
+    if (writePromise && typeof writePromise.then === "function") {
+      writePromise.then(
+        () => { clearTimeout(timer); finish(true); },
+        () => { clearTimeout(timer); finish(fallbackCopyToClipboard(text)); }
+      );
+    } else {
+      clearTimeout(timer);
+      finish(fallbackCopyToClipboard(text));
+    }
+  });
 }
 
 const AI_ERR_INVALID_KEY = "APIキーが無効だ。設定を確認しろ";
@@ -1377,16 +1409,29 @@ function renderAIReview() {
   copyBtn.disabled = !hasAnyRecord;
   copyBtn.style.opacity = hasAnyRecord ? "" : "0.4";
   let copyFeedbackTimer = null;
+  const showCopyFeedback = (ok) => {
+    if (copyFeedbackTimer) clearTimeout(copyFeedbackTimer);
+    copyBtn.textContent = ok ? AI_COPY_SUCCESS_LABEL : AI_COPY_FAIL_LABEL;
+    copyFeedbackTimer = setTimeout(() => {
+      copyBtn.textContent = AI_COPY_LABEL;
+      copyFeedbackTimer = null;
+    }, 2000);
+  };
+  // クリックハンドラ全体を例外安全にする: プロンプト生成やコピー処理のどこで
+  // 例外が起きても(あるいは同期的にthrowされても)必ずフィードバックを出す。
   copyBtn.addEventListener("click", () => {
-    const { prompt } = buildAIReportURL();
-    copyPromptToClipboard(prompt).then(ok => {
-      if (copyFeedbackTimer) clearTimeout(copyFeedbackTimer);
-      copyBtn.textContent = ok ? AI_COPY_SUCCESS_LABEL : AI_COPY_FAIL_LABEL;
-      copyFeedbackTimer = setTimeout(() => {
-        copyBtn.textContent = AI_COPY_LABEL;
-        copyFeedbackTimer = null;
-      }, 2000);
-    });
+    let prompt;
+    try {
+      ({ prompt } = buildAIReportURL());
+    } catch (e) {
+      console.warn("査定プロンプトの生成に失敗しました", e);
+      showCopyFeedback(false);
+      return;
+    }
+    Promise.resolve()
+      .then(() => copyPromptToClipboard(prompt))
+      .catch(() => false)
+      .then(ok => showCopyFeedback(ok));
   });
   btnRow.appendChild(copyBtn);
   wrap.appendChild(btnRow);
