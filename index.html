@@ -93,11 +93,12 @@
   .car-row .c-pct .done { color: var(--good); font-weight: 600; }
   .meter.small { height: 6px; margin-top: 3px; }
   .garage-head, .garage-row {
-    display: grid; grid-template-columns: minmax(0,1fr) 104px 52px 34px;
+    display: grid; grid-template-columns: 26px minmax(0,1fr) 104px 52px 34px;
     gap: 8px; align-items: center; margin-bottom: 8px;
   }
   .garage-head { font-size: 11.5px; color: var(--text-muted); margin-bottom: 4px; }
   .garage-row .g-pct { font-size: 12.5px; color: var(--text-secondary); text-align: right; font-variant-numeric: tabular-nums; }
+  .g-owned { width: 20px; height: 20px; accent-color: var(--good); cursor: pointer; }
 
   .card {
     background: var(--surface-1);
@@ -125,6 +126,29 @@
 
   .meter { height: 8px; border-radius: 4px; background: var(--seq-100); overflow: hidden; }
   .meter > span { display: block; height: 100%; border-radius: 4px; background: var(--seq-450); min-width: 2px; transition: width .4s ease; }
+
+  /* ---- 自由な生活: 3条件チェックリスト ---- */
+  .freedom-list { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+  .freedom-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    font-size: 13px; padding: 2px 0;
+  }
+  .fi-mark {
+    flex: none; width: 20px; height: 20px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; margin-top: 1px;
+    background: var(--grid); color: var(--text-muted);
+  }
+  .freedom-item.done .fi-mark { background: var(--good); color: #fff; }
+  .freedom-item.done .fi-text { color: var(--text-primary); }
+  .fi-text { color: var(--text-secondary); line-height: 1.4; }
+  .fi-text .fi-title { font-weight: 600; }
+  .fi-text .fi-sub { display: block; font-size: 11.5px; color: var(--text-muted); margin-top: 1px; }
+  .freedom-summary {
+    font-size: 12.5px; color: var(--text-secondary); margin-top: 10px;
+    padding-top: 10px; border-top: 1px solid var(--grid);
+  }
+  .freedom-summary strong { color: var(--text-primary); }
 
   /* ---- ヒーロー＆記録 ---- */
   .hero-row { display: grid; grid-template-columns: 1fr; gap: 20px; }
@@ -317,9 +341,9 @@
     <div class="goal">
       <div class="g-label">GOAL 2 — 自由</div>
       <div class="g-title">自由な生活</div>
-      <div class="meter" role="progressbar" aria-label="経済的自由への進捗"><span id="g2-bar"></span></div>
-      <div class="g-pct" id="g2-pct">—</div>
-      <div class="g-detail" id="g2-detail">生活費の25年分(4%ルール)を経済的自由ラインとします。</div>
+      <div class="g-detail" style="margin-bottom:10px">100億を築いた先にある生活。誰にも制限されず、好きな車に乗っている状態。</div>
+      <div class="freedom-list" id="freedom-list"></div>
+      <div class="freedom-summary" id="freedom-summary"></div>
     </div>
     <div class="goal">
       <div class="g-label">GOAL 3 — 愛車</div>
@@ -421,7 +445,7 @@
     <h2>設定とデータ</h2>
     <div class="settings-grid">
       <div class="field">
-        <label for="set-living">月の生活費(自由な生活の判定に使用)</label>
+        <label for="set-living">「誰にも制限されない」に必要な生活費(月)</label>
         <input type="text" id="set-living" placeholder="例: 30万" autocomplete="off">
       </div>
     </div>
@@ -460,8 +484,9 @@ const defaultState = () => ({
   habits: [],                     // { id, name, done: { "YYYY-MM-DD": true } }
   opens: {},                      // { "YYYY-MM-DD": true } アプリを開いた日
   sim: { monthly: 30000, rate: 7, targetYears: 20 },
-  cars: [],                       // { id, name, price } 好きな車は何台でも
-  living: { monthly: 0 },
+  cars: [],                       // { id, name, price, owned } 好きな車は何台でも
+  // 自由な生活 = 誰にも制限されない(経済的自由) + 好きな車に乗っている
+  freedom: { monthlyBudget: 0 },
   reminder: { enabled: false },
 });
 
@@ -472,9 +497,17 @@ function migrateState(parsed) {
   // 旧形式 car:{name,price} → cars:[]
   if (!Array.isArray(s.cars)) s.cars = [];
   if (parsed && parsed.car && (parsed.car.name || parsed.car.price) && !s.cars.length) {
-    s.cars.push({ id: "car-migrated", name: parsed.car.name || "好きな車", price: parsed.car.price || 0 });
+    s.cars.push({ id: "car-migrated", name: parsed.car.name || "好きな車", price: parsed.car.price || 0, owned: false });
   }
+  s.cars.forEach(c => { if (typeof c.owned !== "boolean") c.owned = false; });
   delete s.car;
+  // 旧形式 living:{monthly} → freedom.monthlyBudget(「自由な生活」の定義変更に伴う移行)
+  if (parsed && parsed.living && typeof parsed.living.monthly === "number" && !parsed.freedom) {
+    s.freedom = { monthlyBudget: parsed.living.monthly };
+  }
+  delete s.living;
+  delete s.freedom.place;
+  delete s.freedom.livingThere;
   return s;
 }
 function loadState() {
@@ -604,7 +637,8 @@ function renderToday() {
     strip.appendChild(c);
   };
   chip("💰 100億円");
-  chip("🕊 自由な生活");
+  const fc = freedomConditions(recNow ? recNow.v : 0);
+  chip(fc.met === 2 ? "🕊 自由な生活 — 達成!" : `🕊 自由な生活 ${fc.met}/2`);
   if (state.cars.length) {
     const names = state.cars.map(c => c.name);
     chip(`🚗 ${names.slice(0, 2).join(" / ")}${names.length > 2 ? ` +${names.length - 2}台` : ""}`);
@@ -740,23 +774,8 @@ function renderGoals() {
     $("g1-detail").textContent = "まず現在の資産を記録しましょう。";
   }
 
-  // GOAL 2: 自由な生活(4%ルール: 生活費25年分)
-  const living = state.living.monthly || 0;
-  if (living > 0) {
-    const freedomLine = living * 12 * 25;
-    const ratio = assets / freedomLine;
-    setMeter($("g2-bar"), ratio);
-    $("g2-pct").innerHTML = "";
-    const span = document.createElement("span");
-    if (ratio >= 1) { span.className = "done"; span.textContent = "経済的自由を達成!"; }
-    else span.textContent = fmtPct(ratio * 100);
-    $("g2-pct").appendChild(span);
-    $("g2-detail").textContent = `必要資産: ${fmtYen(freedomLine)}(月${fmtYen(living)} × 12ヶ月 × 25年)`;
-  } else {
-    setMeter($("g2-bar"), 0);
-    $("g2-pct").textContent = "—";
-    $("g2-detail").textContent = "設定で月の生活費を入力すると、経済的自由ラインを計算します。";
-  }
+  // GOAL 2: 自由な生活 = 誰にも制限されない(経済的自由) + 好きな車に乗っている + 好きな場所で暮らしている
+  renderFreedomChecklist(assets);
 
   // GOAL 3: 好きな車たち(何台でも)
   const body = $("g3-body");
@@ -770,10 +789,14 @@ function renderGoals() {
     state.cars.forEach(car => {
       const row = document.createElement("div");
       row.className = "car-row";
-      const nm = document.createElement("span"); nm.className = "c-name"; nm.textContent = car.name;
+      const nm = document.createElement("span"); nm.className = "c-name";
+      nm.textContent = (car.owned ? "🔑 " : "") + car.name;
       const pct = document.createElement("span"); pct.className = "c-pct";
       const ratio = car.price > 0 ? assets / car.price : 0;
-      if (car.price > 0 && ratio >= 1) {
+      if (car.owned) {
+        const sp = document.createElement("span"); sp.className = "done"; sp.textContent = "所有中";
+        pct.appendChild(sp);
+      } else if (car.price > 0 && ratio >= 1) {
         const sp = document.createElement("span"); sp.className = "done"; sp.textContent = "買える!";
         pct.appendChild(sp);
       } else {
@@ -785,6 +808,50 @@ function renderGoals() {
       body.append(row, meter);
       setMeter(bar, ratio);
     });
+  }
+}
+
+function freedomConditions(assets) {
+  const budget = state.freedom.monthlyBudget || 0;
+  const freedomLine = budget * 12 * 25;
+  const c1 = budget > 0 && assets >= freedomLine; // 誰にも制限されない(経済的自由)
+  const c2 = state.cars.some(c => c.owned);       // 好きな車に乗っている
+  return { c1, c2, budget, freedomLine, met: [c1, c2].filter(Boolean).length };
+}
+
+function renderFreedomChecklist(assets) {
+  const { c1, c2, budget, freedomLine, met } = freedomConditions(assets);
+  const list = $("freedom-list");
+  list.innerHTML = "";
+
+  const row = (done, title, sub) => {
+    const item = document.createElement("div");
+    item.className = "freedom-item" + (done ? " done" : "");
+    const mark = document.createElement("span");
+    mark.className = "fi-mark";
+    mark.textContent = done ? "✓" : "";
+    const text = document.createElement("span");
+    text.className = "fi-text";
+    const t = document.createElement("span"); t.className = "fi-title"; t.textContent = title;
+    text.appendChild(t);
+    if (sub) { const s = document.createElement("span"); s.className = "fi-sub"; s.textContent = sub; text.appendChild(s); }
+    item.append(mark, text);
+    list.appendChild(item);
+  };
+
+  row(c1, "誰にも制限されない(経済的自由)",
+    budget > 0 ? `必要資産 ${fmtYen(freedomLine)}(月${fmtYen(budget)}×12ヶ月×25年)` : "設定で生活費を入力してください");
+  row(c2, "好きな車に乗っている",
+    state.cars.length ? "ガレージで「所有」にチェックが入った車があること" : "ガレージに車を登録してください");
+
+  const summary = $("freedom-summary");
+  summary.innerHTML = "";
+  if (met === 2) {
+    const s = document.createElement("strong"); s.textContent = "自由な生活を達成しています🎉";
+    summary.appendChild(s);
+  } else {
+    const s = document.createElement("strong"); s.textContent = `${met} / 2`;
+    summary.append(s, document.createTextNode(" 達成"));
   }
 }
 
@@ -802,7 +869,7 @@ function renderGarage() {
   }
   const head = document.createElement("div");
   head.className = "garage-head";
-  ["車名", "価格", "達成率", ""].forEach(t => {
+  ["所有", "車名", "価格", "達成率", ""].forEach(t => {
     const s = document.createElement("span");
     s.textContent = t;
     if (t === "達成率") s.style.textAlign = "right";
@@ -812,6 +879,13 @@ function renderGarage() {
   state.cars.forEach(car => {
     const row = document.createElement("div");
     row.className = "garage-row";
+    const owned = document.createElement("input");
+    owned.type = "checkbox"; owned.className = "g-owned"; owned.checked = !!car.owned;
+    owned.setAttribute("aria-label", car.name + " を所有している");
+    owned.addEventListener("change", () => {
+      car.owned = owned.checked;
+      saveState(); renderGoals(); renderToday();
+    });
     const nm = document.createElement("input");
     nm.type = "text"; nm.value = car.name;
     nm.setAttribute("aria-label", "車名");
@@ -841,7 +915,7 @@ function renderGarage() {
         saveState(); renderGarage(); renderGoals(); renderToday();
       }
     });
-    row.append(nm, pr, pct, del);
+    row.append(owned, nm, pr, pct, del);
     wrap.appendChild(row);
   });
 }
@@ -1506,12 +1580,12 @@ wireSimInput("sim-target-years", () => {
   state.sim.targetYears = isNaN(v) || v < 1 ? 20 : Math.min(v, 100);
 });
 
-// 設定
-$("set-living").value = state.living.monthly ? fmtYen(state.living.monthly).replace("円", "") : "";
+// 設定: 自由な生活の3条件
+$("set-living").value = state.freedom.monthlyBudget ? fmtYen(state.freedom.monthlyBudget).replace("円", "") : "";
 $("set-living").addEventListener("change", () => {
   const v = parseYen($("set-living").value);
-  state.living.monthly = isNaN(v) || v < 0 ? 0 : v;
-  saveState(); renderGoals();
+  state.freedom.monthlyBudget = isNaN(v) || v < 0 ? 0 : v;
+  saveState(); renderGoals(); renderToday();
 });
 // ガレージ: 車の追加
 $("car-form").addEventListener("submit", e => {
@@ -1551,7 +1625,7 @@ $("import-file").addEventListener("change", () => {
       $("sim-monthly").value = state.sim.monthly ? fmtYen(state.sim.monthly).replace("円", "") : "";
       $("sim-rate").value = state.sim.rate;
       $("sim-target-years").value = state.sim.targetYears;
-      $("set-living").value = state.living.monthly ? fmtYen(state.living.monthly).replace("円", "") : "";
+      $("set-living").value = state.freedom.monthlyBudget ? fmtYen(state.freedom.monthlyBudget).replace("円", "") : "";
       renderAll();
     } catch (err) {
       alert("読み込みに失敗しました: " + err.message);
