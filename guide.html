@@ -194,7 +194,10 @@
 
   <!-- 1. 今の指令 -->
   <section class="card directive-card" id="directive-card" aria-live="polite">
-    <div class="directive-label">今の指令</div>
+    <div class="directive-label" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+      <span>今の指令</span>
+      <span class="tg-chip" id="phase-chip"></span>
+    </div>
     <div class="directive-headline" id="directive-headline"></div>
     <div class="directive-sub" id="directive-sub"></div>
     <div class="btn-row" id="directive-actions"></div>
@@ -350,6 +353,24 @@ function openStreakCompass(compass) {
   const d = new Date();
   while (compass.opens[todayStr(d)]) { s++; d.setDate(d.getDate() - 1); }
   return s;
+}
+// 最新の資産記録額(コンパス未使用/未記録なら0)。フェーズ判定・AI査定プロンプトで共用する。
+function getCurrentAssets(compass) {
+  const c = compass || readCompass();
+  const sorted = sortedRecords(c);
+  return sorted.length ? sorted[sorted.length - 1].v : 0;
+}
+// 資産100万円以上で投資フェーズ、それ未満は貯蓄フェーズ(コンパスと同じ基準)
+function currentPhaseLabel(assets) {
+  return assets >= INVEST_START ? "投資フェーズ" : "貯蓄フェーズ";
+}
+// 2つの日付文字列("YYYY-MM-DD")の間の日数差(to - from)
+function daysBetween(fromStr, toStr) {
+  const [fy, fm, fd] = fromStr.split("-").map(Number);
+  const [ty, tm, td] = toStr.split("-").map(Number);
+  const from = new Date(fy, fm - 1, fd);
+  const to = new Date(ty, tm - 1, td);
+  return Math.round((to - from) / 86400000);
 }
 
 /* ============================================================
@@ -540,6 +561,19 @@ function directiveOnboarding() {
     },
   };
 }
+function directiveRecordsWatch(days) {
+  const id = "recordswatch:" + todayStr();
+  return {
+    headline: `資産の記録が${days}日止まってる。現在資産を記録しろ。`,
+    sub: "コンパスで記録すれば、ここの指令も正確になる。",
+    primaryLabel: "🧭 コンパスで記録する",
+    primaryAria: "資産を記録するためにコンパス(index.html)を開く",
+    onPrimary: () => { window.open("./index.html", "_blank"); },
+    secondaryLabel: "あとで",
+    secondaryAria: "資産記録の指令を今日は後回しにする",
+    onSecondary: () => { markConsumed(id, "skipped"); renderAll(); },
+  };
+}
 
 function pickDirective() {
   const now = new Date();
@@ -577,6 +611,18 @@ function pickDirective() {
   const noHabitsAtAll = compass.habits.length === 0;
   if (noMissionsAtAll && noHabitsAtAll) {
     return directiveOnboarding();
+  }
+
+  // 記録の見張り: 資産記録(records)が7日以上更新されていなければ通常指令より優先する。
+  // records が空(コンパス未使用)なら発動しない(オンボーディングに任せる)。
+  // 「あとで」で今日1日だけ退けられる(既存consumedの仕組みを流用)。
+  const recordsWatchId = "recordswatch:" + today;
+  if (!blocked.has(recordsWatchId)) {
+    const sortedForWatch = sortedRecords(compass);
+    if (sortedForWatch.length) {
+      const staleDays = daysBetween(sortedForWatch[sortedForWatch.length - 1].d, today);
+      if (staleDays >= 7) return directiveRecordsWatch(staleDays);
+    }
   }
 
   if (phase === "morning") {
@@ -661,9 +707,9 @@ function buildOracleTree(topic, facts) {
         no: facts.assets < INVEST_START
           ? { verdict: "見送り", text: "見送り。貯蓄フェーズ中(資産100万円未満)は生存必需以外は原則ナシ。100万円まで走り切れ。" }
           : {
-              q: "今月の余剰資金(使っても計画が崩れない範囲)内か?",
-              yes: { verdict: "条件付きGO", text: "条件付きGO。使っていい。ただし今日中に金額を記録しろ。" },
-              no: { verdict: "見送り", text: "見送り。余剰の外は出すな。欲しいなら稼げ。" },
+              q: "それは資産を生む支出か?(自己投資・事業の種銭など)",
+              yes: { verdict: "条件付きGO", text: "条件付きGO。資産を生む支出なら出していい。ただし今日中に金額を記録しろ。" },
+              no: { verdict: "見送り", text: "見送り。それはただの浪費だ。資産を生まない支出は出すな。" },
             },
       };
     case "skip":
@@ -689,7 +735,15 @@ function buildOracleTree(topic, facts) {
           yes: { verdict: "見送り", text: "見送り。『今日中』を強制する話は罠だ。急がせる話に良い話はない。" },
           no: facts.assets < INVEST_START
             ? { verdict: "見送り", text: "見送り。貯蓄フェーズ中(資産100万円未満)は本業と貯蓄以外に手を出すな。" }
-            : { verdict: "条件付きGO", text: "条件付きGO。1週間寝かせろ。それでも欲しければ、余剰資金の範囲だけで検討していい。" },
+            : {
+                q: "人に急かされて出てきた話か?(勧誘・紹介経由など)",
+                yes: { verdict: "見送り", text: "見送り。人に急かされる話は全部見送り。" },
+                no: {
+                  q: "3日置いても、自分の言葉でその儲けの仕組みを説明できるか?",
+                  yes: { verdict: "条件付きGO", text: "条件付きGO。検討していい。ただし余剰資金の範囲だけで。" },
+                  no: { verdict: "見送り", text: "見送り。説明できない仕組みに金を出すな。" },
+                },
+              },
         },
       };
     case "tired":
@@ -1158,6 +1212,7 @@ function buildBehaviorReport(oracleLimit) {
   const days = last14Dates();
   const compass = readCompass();
   const score = disciplineScore();
+  const phaseLabel = currentPhaseLabel(getCurrentAssets(compass));
 
   const closeDays = days.filter(d => guideState.closes[d]);
   const progressDays = closeDays.filter(d => guideState.closes[d].progress);
@@ -1194,6 +1249,8 @@ function buildBehaviorReport(oracleLimit) {
   const streak = openStreakCompass(compass);
 
   const lines = [];
+  lines.push(`現在フェーズ: ${phaseLabel}`);
+  lines.push("");
   lines.push("■ 規律スコア");
   lines.push(`${score.score}/100(${scoreLabel(score.score)})`);
   lines.push(`内訳: 夜の締め実施 ${score.closeScore}/40, 前進日率 ${score.progressScore}/30, 習慣消化率 ${score.habitAvailable ? score.habitScore + "/30" : "記録なし"}`);
@@ -1512,7 +1569,13 @@ function renderAIReview() {
 /* ============================================================
    全体レンダリング / 初期化
    ============================================================ */
+function renderPhaseChip() {
+  const el = $("phase-chip");
+  if (!el) return;
+  el.textContent = currentPhaseLabel(getCurrentAssets());
+}
 function renderAll() {
+  renderPhaseChip();
   renderDirective();
   renderOracleRecent();
   renderMissions();
