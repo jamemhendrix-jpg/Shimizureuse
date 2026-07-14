@@ -169,17 +169,10 @@
   .score-detail { margin-top: 10px; font-size: 12.5px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 3px; }
 
   /* ---- AI査定 ---- */
-  .ai-review-note { font-size: 12.5px; color: var(--text-secondary); margin-bottom: 12px; }
-  .ai-review-empty { font-size: 13.5px; color: var(--text-secondary); margin-bottom: 12px; }
-  .ai-review-error { margin-top: 10px; font-size: 13.5px; color: #c02828; }
-  @media (prefers-color-scheme: dark) { .ai-review-error { color: #ff6b6b; } }
-  .ai-review-result { margin-top: 14px; padding: 12px; border-radius: 10px; background: var(--page); border: 1px solid var(--border); }
+  .ai-review-note { font-size: 12.5px; color: var(--text-secondary); margin: 12px 0; }
+  .ai-review-result { margin-bottom: 10px; padding: 12px; border-radius: 10px; background: var(--page); border: 1px solid var(--border); }
   .ai-review-result-label { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; }
   .ai-review-result-text { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
-  details.ai-settings { margin-top: 16px; }
-  details.ai-settings summary { cursor: pointer; font-size: 13.5px; color: var(--text-secondary); padding: 8px 0; min-height: 44px; display: flex; align-items: center; }
-  details.ai-settings .field { margin-top: 8px; }
-  .ai-key-note { margin-top: 8px; font-size: 12px; color: var(--text-muted); }
 
   footer.app { color: var(--text-muted); font-size: 12px; text-align: center; margin-top: 32px; }
 </style>
@@ -382,8 +375,6 @@ function defaultGuideState() {
     closes: {},     // { "YYYY-MM-DD": { progress, waste, firstMove } }
     oracleLog: [],  // { d, topic, verdict } 直近50件
     consumed: {},   // { "YYYY-MM-DD": { done: [id], skipped: [id] } }
-    apiKey: "",     // AI査定(機能B): Anthropic APIキー。書き出しJSONには含めない。
-    aiReviews: [],  // AI査定(機能B)の結果 直近5件 { d, text }
   };
 }
 function migrateGuideState(parsed) {
@@ -434,13 +425,7 @@ function migrateGuideState(parsed) {
       }
     });
   }
-  s.apiKey = typeof parsed.apiKey === "string" ? parsed.apiKey : "";
-  if (Array.isArray(parsed.aiReviews)) {
-    s.aiReviews = parsed.aiReviews
-      .filter(r => r && typeof r === "object" && typeof r.d === "string" && typeof r.text === "string")
-      .map(r => ({ d: r.d, text: r.text.slice(0, 4000) }))
-      .slice(-5);
-  }
+  // 旧バージョンの apiKey / aiReviews フィールドは(残っていても)エラーにせず黙って捨てる。
   return s;
 }
 function loadGuideState() {
@@ -1205,21 +1190,27 @@ const AI_URL_PREFIX = "https://claude.ai/new?q=";
 const AI_URL_LIMIT = 7000;
 const AI_ORACLE_MAX = 10;
 
-// 直近14日の行動レポートを生成する。oracleLimit はオラクル裁定履歴の件数上限で、
-// URL長制限に収めるための間引きに使う(呼び出し側が減らしながら再生成する)。
-function buildBehaviorReport(oracleLimit) {
-  if (typeof oracleLimit !== "number" || oracleLimit < 0) oracleLimit = AI_ORACLE_MAX;
+// 直近14日の集計(締め実施・前進・無駄遣い・ミッション・規律スコア・フェーズ)。
+// buildBehaviorReport(AI用プロンプト)と buildLocalReviewText(アプリ内講評)の両方で共用する。
+function computeRecentStats() {
   const days = last14Dates();
   const compass = readCompass();
   const score = disciplineScore();
   const phaseLabel = currentPhaseLabel(getCurrentAssets(compass));
-
   const closeDays = days.filter(d => guideState.closes[d]);
   const progressDays = closeDays.filter(d => guideState.closes[d].progress);
   const wasteDays = closeDays.filter(d => guideState.closes[d].waste);
-
   const missionItems = guideState.missions.items || [];
   const missionDoneCount = missionItems.filter(m => m.done).length;
+  return { days, compass, score, phaseLabel, closeDays, progressDays, wasteDays, missionItems, missionDoneCount };
+}
+
+// 直近14日の行動レポートを生成する。oracleLimit はオラクル裁定履歴の件数上限で、
+// URL長制限に収めるための間引きに使う(呼び出し側が減らしながら再生成する)。
+function buildBehaviorReport(oracleLimit) {
+  if (typeof oracleLimit !== "number" || oracleLimit < 0) oracleLimit = AI_ORACLE_MAX;
+  const stats = computeRecentStats();
+  const { days, compass, score, phaseLabel, closeDays, progressDays, wasteDays, missionItems, missionDoneCount } = stats;
   const prevRateText = guideState.missions.prevRate != null
     ? `${Math.round(guideState.missions.prevRate * 100)}%`
     : "記録なし";
@@ -1303,6 +1294,46 @@ function buildAIReportURL() {
   return { url, prompt, oracleLimit };
 }
 
+/* ---- アプリ内レビュー(ローカル生成・外部送信なし) ---- */
+// 「きょう」1行: 今日の締め・前進・無駄遣い・消化した指令から断定調の1文を作る。
+function buildTodayReviewLine() {
+  const today = todayStr();
+  const nc = guideState.closes[today];
+  const consumedToday = guideState.consumed[today];
+  const doneCount = consumedToday ? consumedToday.done.length : 0;
+  const hasAnything = !!nc || doneCount > 0 || (consumedToday && consumedToday.skipped.length > 0);
+  if (!hasAnything) return "今日はまだ記録がない。";
+
+  let fact, verdict;
+  if (nc) {
+    fact = `${nc.progress ? "前進あり" : "前進なし"}・${nc.waste ? "無駄遣いあり" : "無駄遣いなし"}`;
+    verdict = nc.progress && !nc.waste ? "上出来の一日だ。"
+      : !nc.progress && nc.waste ? "立て直せ。明日は違う一日にしろ。"
+      : nc.progress && nc.waste ? "前進はした。無駄遣いは締めろ。"
+      : "動きが足りない。明日は最初の一手から。";
+  } else {
+    fact = doneCount > 0 ? `指令${doneCount}件消化` : "締めはまだ";
+    verdict = doneCount > 0 ? "その調子で締めまで運べ。" : "何か一つ、消化してから寝ろ。";
+  }
+  return `${fact}。${verdict}`;
+}
+// 直近14日+ミッション+規律スコア+フェーズから断定調の講評を生成する(3〜5行)。
+function buildLocalReviewText() {
+  const stats = computeRecentStats();
+  const missionTotal = stats.missionItems.length;
+  const missionText = missionTotal ? `${stats.missionDoneCount}/${missionTotal}達成` : "記録なし";
+  const verdict = stats.score.score >= 70 ? "この調子を維持しろ。"
+    : stats.wasteDays.length > stats.progressDays.length ? "無駄遣いが前進を上回っている。流れを変えろ。"
+    : "立て直せ。小さくてもいいから前進を積め。";
+  const lines = [
+    buildTodayReviewLine(),
+    `直近14日: 締め実施${stats.closeDays.length}/14・前進${stats.progressDays.length}日・無駄遣い${stats.wasteDays.length}日。`,
+    `ミッション${missionText}・規律スコア${stats.score.score}/100(${scoreLabel(stats.score.score)})・${stats.phaseLabel}。`,
+    verdict,
+  ];
+  return lines.join("\n");
+}
+
 function fallbackCopyToClipboard(text) {
   try {
     const ta = document.createElement("textarea");
@@ -1320,7 +1351,7 @@ function fallbackCopyToClipboard(text) {
 // 成功/失敗をボタンのフィードバック表示に使うため、Promise<boolean> で結果を返す。
 // どんな環境(権限拒否・API不在・同期例外・Promiseが永遠に解決しない等)でも
 // 必ず一定時間内に解決し、呼び出し側が確実にフィードバックを出せるようにする。
-function copyPromptToClipboard(text) {
+function copyTextToClipboard(text) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (ok) => {
@@ -1357,74 +1388,69 @@ function copyPromptToClipboard(text) {
   });
 }
 
-const AI_ERR_INVALID_KEY = "APIキーが無効だ。設定を確認しろ";
-const AI_ERR_BUSY = "混み合っている。少し待ってからもう一度";
-const AI_ERR_GENERIC = "査定に失敗した。通信環境を確認してもう一度";
-
 const AI_COPY_LABEL = "📋 査定文をコピー";
-const AI_COPY_SUCCESS_LABEL = "✓ コピーした";
-const AI_COPY_FAIL_LABEL = "コピーできなかった";
-const AI_EMPTY_MSG = "まだ記録がない。まずは今日の指令と夜の締めから始めよう";
+const LOCAL_COPY_LABEL = "📋 レビューをコピー";
+const COPY_SUCCESS_LABEL = "✓ コピーした";
+const COPY_FAIL_LABEL = "コピーできなかった";
 
-async function fetchAIReviewInApp(prompt) {
-  let resp;
-  try {
-    resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": guideState.apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify({
-        model: "claude-opus-4-8",
-        max_tokens: 2000,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-  } catch (e) {
-    throw new Error(AI_ERR_GENERIC);
-  }
-  if (!resp.ok) {
-    if (resp.status === 401) throw new Error(AI_ERR_INVALID_KEY);
-    if (resp.status === 429) throw new Error(AI_ERR_BUSY);
-    throw new Error(AI_ERR_GENERIC);
-  }
-  let data;
-  try { data = await resp.json(); } catch (e) { throw new Error(AI_ERR_GENERIC); }
-  if (data && data.stop_reason === "refusal") throw new Error(AI_ERR_GENERIC);
-  const block = Array.isArray(data && data.content) ? data.content.find(b => b && b.type === "text") : null;
-  if (!block || typeof block.text !== "string") throw new Error(AI_ERR_GENERIC);
-  return block.text;
-}
-
-let aiReviewState = { loading: false, error: "" };
-let aiSettingsOpen = false;
-
-async function onInAppReviewClick() {
-  if (aiReviewState.loading) return;
-  aiReviewState.loading = true;
-  aiReviewState.error = "";
-  renderAIReview();
-  try {
-    const { prompt } = buildAIReportURL();
-    const text = await fetchAIReviewInApp(prompt);
-    guideState.aiReviews.push({ d: todayStr(), text: String(text).slice(0, 4000) });
-    if (guideState.aiReviews.length > 5) guideState.aiReviews = guideState.aiReviews.slice(-5);
-    saveGuideState();
-    aiReviewState.loading = false;
-    renderAIReview();
-  } catch (e) {
-    aiReviewState.loading = false;
-    aiReviewState.error = (e && e.message) ? e.message : AI_ERR_GENERIC;
-    renderAIReview();
-  }
+// コピー用ボタン1つに「押したら必ず結果が出る」フィードバック挙動を配線する共通処理。
+// getText はクリック時に呼ばれるテキスト取得関数(例外を投げても安全)。
+function wireCopyButton(btn, getText, defaultLabel) {
+  let feedbackTimer = null;
+  const showFeedback = (ok) => {
+    if (feedbackTimer) clearTimeout(feedbackTimer);
+    btn.textContent = ok ? COPY_SUCCESS_LABEL : COPY_FAIL_LABEL;
+    feedbackTimer = setTimeout(() => {
+      btn.textContent = defaultLabel;
+      feedbackTimer = null;
+    }, 2000);
+  };
+  // クリックハンドラ全体を例外安全にする: テキスト生成やコピー処理のどこで
+  // 例外が起きても(あるいは同期的にthrowされても)必ずフィードバックを出す。
+  btn.addEventListener("click", () => {
+    let text;
+    try {
+      text = getText();
+    } catch (e) {
+      console.warn("コピー用テキストの生成に失敗しました", e);
+      showFeedback(false);
+      return;
+    }
+    Promise.resolve()
+      .then(() => copyTextToClipboard(text))
+      .catch(() => false)
+      .then(showFeedback);
+  });
 }
 
 function renderAIReview() {
   const wrap = $("ai-review-body");
   wrap.innerHTML = "";
+
+  // アプリ内レビュー(ローカル生成・常時表示・外部送信なし)
+  const reviewBox = document.createElement("div");
+  reviewBox.className = "ai-review-result";
+  const reviewLabel = document.createElement("div");
+  reviewLabel.className = "ai-review-result-label";
+  reviewLabel.textContent = "アプリからの講評";
+  const reviewText = document.createElement("div");
+  reviewText.className = "ai-review-result-text";
+  reviewText.textContent = buildLocalReviewText();
+  reviewBox.append(reviewLabel, reviewText);
+  wrap.appendChild(reviewBox);
+
+  const localCopyBtn = document.createElement("button");
+  localCopyBtn.type = "button"; localCopyBtn.className = "ghost";
+  localCopyBtn.textContent = LOCAL_COPY_LABEL;
+  localCopyBtn.setAttribute("aria-label", "アプリの講評をコピーする");
+  wireCopyButton(localCopyBtn, () => buildLocalReviewText(), LOCAL_COPY_LABEL);
+  wrap.appendChild(localCopyBtn);
+
+  // 外部AI用プロンプト
+  const note = document.createElement("div");
+  note.className = "ai-review-note";
+  note.textContent = "あなたのClaudeアカウントで開きます。コピーして好きなAIに貼ってもいい。データが送られるのはボタンを押した時だけです。";
+  wrap.appendChild(note);
 
   // 行動記録が実質ゼロ(夜の締め・ミッション・オラクル履歴・コンパス習慣のいずれも0件)かどうか。
   const compassForEmptyCheck = readCompass();
@@ -1432,18 +1458,6 @@ function renderAIReview() {
     || (guideState.missions.items || []).length > 0
     || (guideState.oracleLog || []).length > 0
     || compassForEmptyCheck.habits.length > 0;
-
-  const note = document.createElement("div");
-  note.className = "ai-review-note";
-  note.textContent = "あなたのClaudeアカウントで開きます。データはボタンを押した時だけClaudeに送られます";
-  wrap.appendChild(note);
-
-  if (!hasAnyRecord) {
-    const empty = document.createElement("div");
-    empty.className = "ai-review-empty";
-    empty.textContent = AI_EMPTY_MSG;
-    wrap.appendChild(empty);
-  }
 
   const btnRow = document.createElement("div");
   btnRow.className = "btn-row";
@@ -1465,105 +1479,9 @@ function renderAIReview() {
   copyBtn.setAttribute("aria-label", "査定用のプロンプトをコピーする");
   copyBtn.disabled = !hasAnyRecord;
   copyBtn.style.opacity = hasAnyRecord ? "" : "0.4";
-  let copyFeedbackTimer = null;
-  const showCopyFeedback = (ok) => {
-    if (copyFeedbackTimer) clearTimeout(copyFeedbackTimer);
-    copyBtn.textContent = ok ? AI_COPY_SUCCESS_LABEL : AI_COPY_FAIL_LABEL;
-    copyFeedbackTimer = setTimeout(() => {
-      copyBtn.textContent = AI_COPY_LABEL;
-      copyFeedbackTimer = null;
-    }, 2000);
-  };
-  // クリックハンドラ全体を例外安全にする: プロンプト生成やコピー処理のどこで
-  // 例外が起きても(あるいは同期的にthrowされても)必ずフィードバックを出す。
-  copyBtn.addEventListener("click", () => {
-    let prompt;
-    try {
-      ({ prompt } = buildAIReportURL());
-    } catch (e) {
-      console.warn("査定プロンプトの生成に失敗しました", e);
-      showCopyFeedback(false);
-      return;
-    }
-    Promise.resolve()
-      .then(() => copyPromptToClipboard(prompt))
-      .catch(() => false)
-      .then(ok => showCopyFeedback(ok));
-  });
+  wireCopyButton(copyBtn, () => buildAIReportURL().prompt, AI_COPY_LABEL);
   btnRow.appendChild(copyBtn);
   wrap.appendChild(btnRow);
-
-  if (guideState.apiKey) {
-    const inAppRow = document.createElement("div");
-    inAppRow.className = "btn-row";
-    inAppRow.style.marginTop = "8px";
-    const inAppBtn = document.createElement("button");
-    inAppBtn.type = "button"; inAppBtn.className = "ghost";
-    inAppBtn.textContent = aiReviewState.loading ? "査定中…" : "アプリ内で査定する";
-    inAppBtn.disabled = aiReviewState.loading;
-    inAppBtn.setAttribute("aria-label", "アプリ内で行動査定を実行する");
-    inAppBtn.addEventListener("click", onInAppReviewClick);
-    inAppRow.appendChild(inAppBtn);
-    wrap.appendChild(inAppRow);
-
-    if (aiReviewState.error) {
-      const err = document.createElement("div");
-      err.className = "ai-review-error";
-      err.textContent = aiReviewState.error;
-      wrap.appendChild(err);
-    }
-
-    const reviews = guideState.aiReviews || [];
-    const latest = reviews.length ? reviews[reviews.length - 1] : null;
-    if (latest) {
-      const resultWrap = document.createElement("div");
-      resultWrap.className = "ai-review-result";
-      const label = document.createElement("div");
-      label.className = "ai-review-result-label";
-      label.textContent = `${latest.d} の査定`;
-      const body = document.createElement("div");
-      body.className = "ai-review-result-text";
-      body.textContent = latest.text;
-      resultWrap.append(label, body);
-      wrap.appendChild(resultWrap);
-    }
-  }
-
-  const details = document.createElement("details");
-  details.className = "ai-settings";
-  details.open = aiSettingsOpen;
-  details.addEventListener("toggle", () => { aiSettingsOpen = details.open; });
-  const summary = document.createElement("summary");
-  summary.textContent = "詳細設定";
-  details.appendChild(summary);
-
-  const keyField = document.createElement("div");
-  keyField.className = "field";
-  const keyLabel = document.createElement("label");
-  keyLabel.textContent = "Anthropic APIキー(任意)";
-  keyLabel.setAttribute("for", "ai-api-key");
-  const keyInput = document.createElement("input");
-  keyInput.type = "password"; keyInput.id = "ai-api-key";
-  keyInput.value = guideState.apiKey || "";
-  keyInput.placeholder = "sk-ant-...";
-  keyInput.autocomplete = "off";
-  // 1文字ごとの再描画はフォーカスを失わせるため、入力中は状態更新のみ行い、
-  // 確定時(blur/change)にカードを再描画してボタンの出現有無を反映する。
-  keyInput.addEventListener("input", () => {
-    guideState.apiKey = keyInput.value.trim();
-    saveGuideState();
-  });
-  keyInput.addEventListener("change", () => renderAIReview());
-  keyInput.addEventListener("blur", () => renderAIReview());
-  keyField.append(keyLabel, keyInput);
-  details.appendChild(keyField);
-
-  const keyNote = document.createElement("div");
-  keyNote.className = "ai-key-note";
-  keyNote.textContent = "キーはこの端末にのみ保存。査定1回あたり数円の従量課金";
-  details.appendChild(keyNote);
-
-  wrap.appendChild(details);
 }
 
 /* ============================================================
@@ -1574,6 +1492,42 @@ function renderPhaseChip() {
   if (!el) return;
   el.textContent = currentPhaseLabel(getCurrentAssets());
 }
+
+/* ---- 通知に載せる指令ペイロード(機能A) ---- */
+// 現在時刻から通知本文用の見出しを決める。夜間は今夜の締めで決まった
+// 「明日の最初の一手」を優先する(翌朝の通知で意味を持つのはそちらのため)。
+// それが無ければ、通常の pickDirective() の見出しをそのまま使う。
+function computeNotifyHeadline(now) {
+  now = now || new Date();
+  const hour = now.getHours();
+  const isNight = !(hour >= 5 && hour < 18);
+  if (isNight) {
+    const nc = guideState.closes[nightKeyDate(now)];
+    if (nc && nc.firstMove) {
+      return `まず「${nc.firstMove}」をやれ。決めたのは昨日の自分だ。`;
+    }
+  }
+  return pickDirective().headline;
+}
+function computeNotifyPayload(now) {
+  now = now || new Date();
+  return {
+    headline: computeNotifyHeadline(now),
+    goal: "資産100億円・自由・好きな車",
+    updatedAt: now.toISOString(),
+  };
+}
+// Cache API へ書き込む。未対応/失敗は既存動作を壊さないよう黙って無視する。
+function writeNotifyPayload() {
+  try {
+    if (typeof caches === "undefined") return;
+    const payload = computeNotifyPayload();
+    caches.open("michibiki-notify")
+      .then(c => c.put("payload", new Response(JSON.stringify(payload))))
+      .catch(() => {});
+  } catch (e) { /* Cache API未対応/失敗は無視 */ }
+}
+
 function renderAll() {
   renderPhaseChip();
   renderDirective();
@@ -1582,6 +1536,7 @@ function renderAll() {
   renderClose();
   renderScore();
   renderAIReview();
+  writeNotifyPayload();
 }
 
 rolloverMissionsIfNeeded();
@@ -1606,10 +1561,7 @@ document.addEventListener("touchstart", e => scrollTextInputIntoView(e.target), 
 /* 設定: データ入出力(自分のデータのみ) */
 $("export-btn").addEventListener("click", () => {
   try {
-    // APIキー(機能B・AI査定)は書き出しJSONに含めない。
-    const exportData = Object.assign({}, guideState);
-    delete exportData.apiKey;
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(guideState, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `michibiki-${todayStr()}.json`;
@@ -1626,14 +1578,10 @@ $("import-file").addEventListener("change", () => {
     try {
       const parsed = JSON.parse(reader.result);
       if (!confirm("現在の「導き」データを読み込んだ内容で置き換えます。よろしいですか?")) return;
-      // 書き出しJSONにはAPIキーを含めていないため、読み込み時にこの端末に保存済みのキーを消してしまわないよう引き継ぐ。
-      const keepApiKey = guideState.apiKey;
       guideState = migrateGuideState(parsed);
-      guideState.apiKey = keepApiKey;
       saveGuideState();
       closeDraft = null;
       oracleSession = null;
-      aiReviewState = { loading: false, error: "" };
       renderAll();
     } catch (err) {
       alert("読み込みに失敗しました: " + err.message);
