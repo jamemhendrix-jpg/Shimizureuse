@@ -174,6 +174,13 @@
   .ai-review-result-label { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; }
   .ai-review-result-text { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
 
+  /* ---- メンターの目(弱点分析) ---- */
+  .weakness-item { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+  .weakness-item:first-of-type { margin-top: 6px; padding-top: 0; border-top: none; }
+  .weakness-label { display: block; font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .weakness-evidence { font-size: 13.5px; color: var(--text-secondary); margin-bottom: 2px; }
+  .weakness-counter { font-size: 13.5px; font-weight: 600; }
+
   footer.app { color: var(--text-muted); font-size: 12px; text-align: center; margin-top: 32px; }
 </style>
 </head>
@@ -371,7 +378,7 @@ function daysBetween(fromStr, toStr) {
    ============================================================ */
 function defaultGuideState() {
   return {
-    missions: { weekKey: null, items: [], prevWeekKey: null, prevRate: null, carryCandidates: [] },
+    missions: { weekKey: null, items: [], prevWeekKey: null, prevRate: null, carryCandidates: [], carryStreak: 0 },
     closes: {},     // { "YYYY-MM-DD": { progress, waste, firstMove } }
     oracleLog: [],  // { d, topic, verdict } 直近50件
     consumed: {},   // { "YYYY-MM-DD": { done: [id], skipped: [id] } }
@@ -395,6 +402,7 @@ function migrateGuideState(parsed) {
           .filter(c => c && typeof c.text === "string")
           .map(c => ({ id: typeof c.id === "string" ? c.id : uid(), text: String(c.text).slice(0, 100) }))
       : [];
+    s.missions.carryStreak = typeof parsed.missions.carryStreak === "number" ? parsed.missions.carryStreak : 0;
   }
   if (parsed.closes && typeof parsed.closes === "object") {
     Object.keys(parsed.closes).forEach(k => {
@@ -451,12 +459,18 @@ function rolloverMissionsIfNeeded() {
   const hadPrev = guideState.missions.weekKey !== null;
   const prevItems = guideState.missions.items || [];
   const prevRate = (hadPrev && prevItems.length) ? prevItems.filter(i => i.done).length / prevItems.length : null;
+  const carryCandidates = prevItems.filter(i => !i.done).map(i => ({ id: uid(), text: i.text }));
+  // 持ち越し癖の検出用: 持ち越しが発生した週が何週連続で続いているかを数える。
+  // 前週が無い(初回)か、持ち越しが無ければリセットする。
+  const prevStreak = guideState.missions.carryStreak || 0;
+  const carryStreak = hadPrev ? (carryCandidates.length > 0 ? prevStreak + 1 : 0) : 0;
   guideState.missions = {
     weekKey: wk,
     items: [],
     prevWeekKey: hadPrev ? guideState.missions.weekKey : null,
     prevRate: hadPrev ? prevRate : null,
-    carryCandidates: prevItems.filter(i => !i.done).map(i => ({ id: uid(), text: i.text })),
+    carryCandidates,
+    carryStreak,
   };
   saveGuideState();
 }
@@ -1174,7 +1188,7 @@ function renderScore() {
 /* ============================================================
    6. AI査定
    ============================================================ */
-const AI_PROMPT_HEAD = `あなたは俺専属の参謀だ。俺の目標は資産100億円・経済的自由・好きな車。
+const AI_PROMPT_HEAD = `あなたは俺専属の参謀でありメンターだ。俺の目標は資産100億円・経済的自由・好きな車。
 以下は直近14日の行動記録だ。忖度なしで査定しろ。
 
 【出力形式】
@@ -1182,6 +1196,7 @@ const AI_PROMPT_HEAD = `あなたは俺専属の参謀だ。俺の目標は資�
 2. よくやった点(1つだけ)
 3. 一番の問題行動(1つだけ、遠慮なく)
 4. 来週の指令(3つ、具体的に。抽象論禁止)
+5. 弱点への処方箋(検出済みパターンを踏まえ1つ)
 短く、断定調で頼む。
 
 【行動記録】
@@ -1203,6 +1218,166 @@ function computeRecentStats() {
   const missionItems = guideState.missions.items || [];
   const missionDoneCount = missionItems.filter(m => m.done).length;
   return { days, compass, score, phaseLabel, closeDays, progressDays, wasteDays, missionItems, missionDoneCount };
+}
+
+/* ---- 弱点分析(メンターの目・すべてローカル処理・送信なし) ---- */
+function last28Dates() {
+  const arr = [];
+  const now = new Date();
+  for (let i = 27; i >= 0; i--) arr.push(todayStr(new Date(now.getTime() - i * 86400000)));
+  return arr;
+}
+const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
+function weekdayIndex(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d).getDay();
+}
+// 直近28日の末尾(直近)から遡って、夜の締めが何日連続で未実施かを数える。
+function missedCloseStreak(days) {
+  let streak = 0;
+  for (let i = days.length - 1; i >= 0; i--) {
+    if (guideState.closes[days[i]]) break;
+    streak++;
+  }
+  return streak;
+}
+// 無駄遣い・前進なしの「悪い日」が特定の曜日に集中していないかを調べる。
+// その曜日の記録が3回以上あり、うち50%以上が悪い日なら該当。複数該当時は集中度が最も高い曜日を返す。
+function worstWeekdayBreakdown(closeDays) {
+  const buckets = [0, 1, 2, 3, 4, 5, 6].map(() => ({ total: 0, bad: 0 }));
+  closeDays.forEach(d => {
+    const c = guideState.closes[d];
+    const wd = weekdayIndex(d);
+    buckets[wd].total++;
+    if (c.waste || !c.progress) buckets[wd].bad++;
+  });
+  let best = null;
+  buckets.forEach((b, wd) => {
+    if (b.total >= 3) {
+      const ratio = b.bad / b.total;
+      if (ratio >= 0.5 && (!best || ratio > best.ratio)) {
+        best = { label: WEEKDAY_LABELS[wd] + "曜日", bad: b.bad, total: b.total, ratio };
+      }
+    }
+  });
+  return best;
+}
+// 直近28日(データがある範囲)から行動パターン上の弱点を検出する。すべてローカル処理・外部送信なし。
+// 記録日(夜の締めがある日)が7日未満ならデータ不足として扱う。呼び出し側でスコア降順の上位2件だけを使う。
+function analyzeWeaknesses() {
+  const days = last28Dates();
+  const compass = readCompass();
+  const closeDays = days.filter(d => guideState.closes[d]);
+  if (closeDays.length < 7) {
+    return { insufficient: true, weaknesses: [] };
+  }
+
+  const wasteDays = closeDays.filter(d => guideState.closes[d].waste);
+  const noProgressDays = closeDays.filter(d => !guideState.closes[d].progress);
+  const last7 = days.slice(-7);
+  const oracleLast7 = guideState.oracleLog.filter(o => last7.includes(o.d));
+  const oracleCount = topic => oracleLast7.filter(o => o.topic === topic).length;
+
+  const weaknesses = [];
+
+  // 1. 浪費傾向
+  const wasteRatio = wasteDays.length / closeDays.length;
+  const spendCount = oracleCount("spend");
+  if (wasteRatio >= 0.3 || spendCount >= 3) {
+    const parts = [];
+    if (wasteRatio >= 0.3) parts.push(`記録日${closeDays.length}日中${wasteDays.length}日で無駄遣い`);
+    if (spendCount >= 3) parts.push(`直近7日で「金を使いたい」${spendCount}回`);
+    weaknesses.push({
+      id: "waste", label: "浪費傾向",
+      evidence: parts.join("、") + "。",
+      counter: "買う前に24時間置け。ほしい物リストに書くだけで半分は消える。",
+      score: Math.max(wasteRatio, Math.min(spendCount / 7, 1)),
+    });
+  }
+
+  // 2. サボり傾向
+  const noProgressRatio = noProgressDays.length / closeDays.length;
+  const skipCount = oracleCount("skip");
+  const missedStreak = missedCloseStreak(days);
+  if (noProgressRatio >= 0.4 || skipCount >= 3 || missedStreak >= 3) {
+    const parts = [];
+    if (noProgressRatio >= 0.4) parts.push(`記録日${closeDays.length}日中${noProgressDays.length}日で前進なし`);
+    if (skipCount >= 3) parts.push(`直近7日で「サボりたい」${skipCount}回`);
+    if (missedStreak >= 3) parts.push(`締めが${missedStreak}日連続未実施`);
+    weaknesses.push({
+      id: "skip", label: "サボり傾向",
+      evidence: parts.join("、") + "。",
+      counter: "やる気は待つな。3分だけ着手しろ。",
+      score: Math.max(noProgressRatio, Math.min(skipCount / 7, 1), Math.min(missedStreak / 7, 1)),
+    });
+  }
+
+  // 3. 不安傾向
+  const anxiousCount = oracleCount("anxious");
+  if (anxiousCount >= 3) {
+    weaknesses.push({
+      id: "anxious", label: "不安傾向",
+      evidence: `直近7日で「不安だ」${anxiousCount}回。`,
+      counter: "不安になったら数字を見ろ。感情より記録だ。",
+      score: Math.min(anxiousCount / 7, 1),
+    });
+  }
+
+  // 4. 記録切れ癖
+  const sorted = sortedRecords(compass);
+  let avgInterval = null;
+  if (sorted.length >= 2) {
+    let total = 0;
+    for (let i = 1; i < sorted.length; i++) total += daysBetween(sorted[i - 1].d, sorted[i].d);
+    avgInterval = total / (sorted.length - 1);
+  }
+  const staleDays = sorted.length ? daysBetween(sorted[sorted.length - 1].d, todayStr()) : null;
+  const watchActive = staleDays !== null && staleDays >= 7;
+  if ((avgInterval !== null && avgInterval > 10) || watchActive) {
+    const parts = [];
+    if (avgInterval !== null && avgInterval > 10) parts.push(`資産記録の平均間隔が${Math.round(avgInterval)}日`);
+    if (watchActive) parts.push(`直近の記録から${staleDays}日経過`);
+    weaknesses.push({
+      id: "recordgap", label: "記録切れ癖",
+      evidence: parts.join("、") + "。",
+      counter: "記録は週1、曜日を固定しろ。",
+      score: Math.max(
+        avgInterval !== null ? Math.min(avgInterval / 20, 1) : 0,
+        watchActive ? Math.min(staleDays / 14, 1) : 0
+      ),
+    });
+  }
+
+  // 5. 曜日の崩れ
+  const weekdayInfo = worstWeekdayBreakdown(closeDays);
+  if (weekdayInfo) {
+    weaknesses.push({
+      id: "weekday", label: "曜日の崩れ",
+      evidence: `${weekdayInfo.label}に無駄遣い・停滞が${weekdayInfo.bad}/${weekdayInfo.total}回集中。`,
+      counter: `${weekdayInfo.label}が危ない。${weekdayInfo.label}の夜は先に予定を入れろ。`,
+      score: weekdayInfo.ratio,
+    });
+  }
+
+  // 6. 持ち越し癖
+  const carryStreak = guideState.missions.carryStreak || 0;
+  if (carryStreak >= 2) {
+    weaknesses.push({
+      id: "carryover", label: "持ち越し癖",
+      evidence: `ミッションの持ち越しが${carryStreak}週連続。`,
+      counter: "ミッションが大きすぎる。半分に割れ。",
+      score: Math.min(carryStreak / 4, 1),
+    });
+  }
+
+  weaknesses.sort((a, b) => b.score - a.score);
+  return { insufficient: false, weaknesses: weaknesses.slice(0, 2) };
+}
+// UI表示・コピー内容の両方で使う「メンターの目」テキスト行。
+function buildWeaknessLines(result) {
+  if (result.insufficient) return ["まだパターンを読むには記録が足りない。まず1週間続けよう。"];
+  if (!result.weaknesses.length) return ["今のところ大きな崩れはない。この調子だ。"];
+  return result.weaknesses.map(w => `${w.label}: ${w.evidence} ${w.counter}`);
 }
 
 // 直近14日の行動レポートを生成する。oracleLimit はオラクル裁定履歴の件数上限で、
@@ -1276,6 +1451,13 @@ function buildBehaviorReport(oracleLimit) {
   lines.push(`習慣消化率(直近14日): ${habitRate}`);
   lines.push(`開いた連続日数: ${streak}日`);
 
+  const weaknessResult = analyzeWeaknesses();
+  if (!weaknessResult.insufficient && weaknessResult.weaknesses.length) {
+    lines.push("");
+    lines.push("【検出済みの行動パターン】");
+    weaknessResult.weaknesses.forEach(w => lines.push(`- ${w.label}: ${w.evidence}`));
+  }
+
   return lines.join("\n");
 }
 function buildAIPrompt(oracleLimit) {
@@ -1318,7 +1500,8 @@ function buildTodayReviewLine() {
   return `${fact}。${verdict}`;
 }
 // 直近14日+ミッション+規律スコア+フェーズから断定調の講評を生成する(3〜5行)。
-function buildLocalReviewText() {
+// 画面表示用(メンターの目ブロックは別に描画するため含めない)。
+function buildLocalReviewSummaryText() {
   const stats = computeRecentStats();
   const missionTotal = stats.missionItems.length;
   const missionText = missionTotal ? `${stats.missionDoneCount}/${missionTotal}達成` : "記録なし";
@@ -1330,6 +1513,16 @@ function buildLocalReviewText() {
     `直近14日: 締め実施${stats.closeDays.length}/14・前進${stats.progressDays.length}日・無駄遣い${stats.wasteDays.length}日。`,
     `ミッション${missionText}・規律スコア${stats.score.score}/100(${scoreLabel(stats.score.score)})・${stats.phaseLabel}。`,
     verdict,
+  ];
+  return lines.join("\n");
+}
+// コピー用の完全版: 講評+「🎯 メンターの目」(弱点分析)を含める。
+function buildLocalReviewText() {
+  const lines = [
+    buildLocalReviewSummaryText(),
+    "",
+    "🎯 メンターの目",
+    ...buildWeaknessLines(analyzeWeaknesses()),
   ];
   return lines.join("\n");
 }
@@ -1435,8 +1628,40 @@ function renderAIReview() {
   reviewLabel.textContent = "アプリからの講評";
   const reviewText = document.createElement("div");
   reviewText.className = "ai-review-result-text";
-  reviewText.textContent = buildLocalReviewText();
+  reviewText.textContent = buildLocalReviewSummaryText();
   reviewBox.append(reviewLabel, reviewText);
+
+  // 🎯 メンターの目(弱点分析・ローカル処理・講評の下)
+  const mentorLabel = document.createElement("div");
+  mentorLabel.className = "ai-review-result-label";
+  mentorLabel.style.marginTop = "12px";
+  mentorLabel.textContent = "🎯 メンターの目";
+  reviewBox.appendChild(mentorLabel);
+  const weaknessResult = analyzeWeaknesses();
+  if (weaknessResult.insufficient || !weaknessResult.weaknesses.length) {
+    const msg = document.createElement("div");
+    msg.className = "ai-review-result-text";
+    msg.textContent = weaknessResult.insufficient
+      ? "まだパターンを読むには記録が足りない。まず1週間続けよう。"
+      : "今のところ大きな崩れはない。この調子だ。";
+    reviewBox.appendChild(msg);
+  } else {
+    weaknessResult.weaknesses.forEach(w => {
+      const item = document.createElement("div");
+      item.className = "weakness-item";
+      const lab = document.createElement("strong");
+      lab.className = "weakness-label";
+      lab.textContent = w.label;
+      const ev = document.createElement("div");
+      ev.className = "weakness-evidence";
+      ev.textContent = w.evidence;
+      const co = document.createElement("div");
+      co.className = "weakness-counter";
+      co.textContent = w.counter;
+      item.append(lab, ev, co);
+      reviewBox.appendChild(item);
+    });
+  }
   wrap.appendChild(reviewBox);
 
   const localCopyBtn = document.createElement("button");
