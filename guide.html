@@ -117,8 +117,23 @@
 
   /* ---- 概念ヘッダー ---- */
   .concept-card { border: 2px solid var(--series-1); }
-  .concept-title { font-size: 21px; font-weight: 700; line-height: 1.45; }
   .concept-sub { font-size: 13px; color: var(--text-secondary); margin-top: 6px; }
+  /* タップで編集できる目標(概念)行。ボタンのベーススタイルを上書きして地の文のように見せつつ、44pxタップ領域は維持する。 */
+  .concept-title-btn {
+    background: transparent; border: none;
+    padding: 4px 6px; margin: -4px -6px;
+    min-height: 44px; width: 100%;
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 21px; font-weight: 700; line-height: 1.45;
+    color: var(--text-primary); text-align: left;
+    border-radius: 8px; cursor: pointer; justify-content: flex-start;
+  }
+  .concept-title-btn:hover { background: var(--accent-wash); }
+  .concept-edit-hint { font-size: 14px; color: var(--text-muted); flex: none; }
+  .concept-edit-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .concept-edit-form input[type="text"] { flex: 1; min-width: 180px; font-size: 17px; font-weight: 700; }
+  #concept-milestone { margin-top: 10px; }
+  .milestone-line { font-size: 12.5px; color: var(--text-secondary); margin-bottom: 6px; }
 
   /* ---- 上昇イメージ ---- */
   .rising-label { font-size: 12.5px; color: var(--text-muted); font-weight: 600; letter-spacing: 0.04em; margin-bottom: 8px; }
@@ -146,8 +161,31 @@
   .settle-comment { margin-top: 12px; font-size: 14px; font-weight: 600; color: var(--text-secondary); }
 
   /* ---- スコア表示 ---- */
-  .score-value { font-size: 32px; font-weight: 700; line-height: 1.2; }
+  #bets-score { position: relative; }
+  .score-value { font-size: 40px; font-weight: 800; line-height: 1.2; }
   .score-label { font-size: 13px; color: var(--text-secondary); margin-bottom: 10px; }
+  /* チェック/解除の瞬間に出る小さな+1/-1ポップ。prefers-reduced-motionでは動きを止めてフェードのみにする。 */
+  .score-pop {
+    position: absolute; top: 0; right: 0;
+    font-size: 16px; font-weight: 700; color: var(--good);
+    pointer-events: none; white-space: nowrap;
+    animation: score-pop-rise .8s ease-out forwards;
+  }
+  .score-pop.neg { color: var(--text-muted); }
+  @keyframes score-pop-rise {
+    0% { opacity: 0; transform: translateY(6px) scale(0.85); }
+    20% { opacity: 1; transform: translateY(0) scale(1.08); }
+    35% { transform: scale(1); }
+    100% { opacity: 0; transform: translateY(-16px) scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .score-pop { animation: score-pop-fade .9s ease-out forwards; }
+  }
+  @keyframes score-pop-fade {
+    0% { opacity: 0; }
+    25% { opacity: 1; }
+    100% { opacity: 0; }
+  }
 
   /* ---- チャート(コンパスのパターンを踏襲) ---- */
   .chart-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
@@ -181,13 +219,15 @@
   <header class="app">
     <h1>📈 導き</h1>
     <p>週に賭けろ。線を見ろ。</p>
+    <p style="margin-top:4px">毎週やることを賭け、クリアで線が上がる。線の傾きが人生の傾きだ。</p>
     <p style="margin-top:6px"><a href="./index.html">🧭 コンパスへ</a></p>
   </header>
 
   <!-- 1. 概念ヘッダー -->
   <section class="card concept-card">
-    <div class="concept-title">好きな車に乗る、自由な生活</div>
+    <div id="concept-title-wrap"></div>
     <div class="concept-sub">そのために — 100億<span id="concept-assets"></span></div>
+    <div id="concept-milestone" hidden></div>
   </section>
 
   <!-- 2. 上昇イメージ -->
@@ -390,8 +430,9 @@ function nextMilestoneInfo(assets) {
 /* ============================================================
    導き自身のデータ(michibiki:v2)
    ============================================================ */
+const DEFAULT_GOAL = "好きな車に乗る、自由な生活";
 function defaultGuideState() {
-  return { weeks: {}, slots: 3, image: { weekKey: null, text: "" } };
+  return { weeks: {}, slots: 3, image: { weekKey: null, text: "" }, goal: DEFAULT_GOAL };
 }
 function sanitizeItem(i) {
   if (!i || typeof i !== "object") return null;
@@ -419,6 +460,10 @@ function migrateGuideState(parsed) {
   if (parsed.image && typeof parsed.image === "object" && typeof parsed.image.text === "string"
       && (parsed.image.weekKey === null || /^\d{4}-W\d{2}$/.test(parsed.image.weekKey))) {
     s.image = { weekKey: parsed.image.weekKey, text: parsed.image.text };
+  }
+  if (typeof parsed.goal === "string") {
+    const g = parsed.goal.trim().slice(0, 60);
+    s.goal = g || DEFAULT_GOAL;
   }
   // v1(michibiki:v1)のフィールドが紛れ込んでいても、対象外として黙って捨てる(エラーにしない)。
   return s;
@@ -449,6 +494,18 @@ function computeWeekScore(w) {
 }
 function formatScore(n) {
   return (n > 0 ? "+" : "") + n;
+}
+// チェック/解除の瞬間に出る小さなスコア差分ポップ(CSSアニメで自動消滅)。
+function showScorePop(delta) {
+  const wrap = $("bets-score");
+  if (!wrap) return;
+  const pop = document.createElement("span");
+  pop.className = "score-pop" + (delta < 0 ? " neg" : "");
+  pop.textContent = formatScore(delta);
+  pop.setAttribute("aria-hidden", "true");
+  wrap.appendChild(pop);
+  pop.addEventListener("animationend", () => pop.remove());
+  setTimeout(() => { if (pop.isConnected) pop.remove(); }, 1500); // アニメーションイベント未発火環境への保険
 }
 // 全週(現在週含む)を週キー昇順に並べ、総合累積・実感累積を積み上げる。
 function buildWeekSeriesAll() {
@@ -636,9 +693,82 @@ function wireCopyButton(btn, getText, defaultLabel) {
 /* ============================================================
    1. 概念ヘッダー / 2. 上昇イメージ
    ============================================================ */
+let conceptEditing = false; // タップ編集中フラグ
+let conceptEditingRendered = null; // 直前に描画したモード。編集中の再描画で入力欄を壊さないための記録。
+function renderConceptGoal() {
+  const wrap = $("concept-title-wrap");
+  if (conceptEditing && conceptEditingRendered === true) return; // 編集中はフォーカス/入力途中の値を壊さない
+  conceptEditingRendered = conceptEditing;
+  wrap.innerHTML = "";
+  if (!conceptEditing) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "concept-title-btn";
+    btn.setAttribute("aria-label", `目標を編集する(現在: ${guideState.goal})`);
+    const span = document.createElement("span");
+    span.textContent = guideState.goal;
+    const hint = document.createElement("span");
+    hint.className = "concept-edit-hint";
+    hint.setAttribute("aria-hidden", "true");
+    hint.textContent = "✎";
+    btn.append(span, hint);
+    btn.addEventListener("click", () => {
+      conceptEditing = true;
+      renderConceptGoal();
+    });
+    wrap.appendChild(btn);
+  } else {
+    const form = document.createElement("form");
+    form.className = "concept-edit-form";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = guideState.goal;
+    input.maxLength = 60;
+    input.setAttribute("aria-label", "目標を編集する");
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "submit"; saveBtn.className = "primary"; saveBtn.textContent = "保存";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button"; cancelBtn.className = "ghost"; cancelBtn.textContent = "やめる";
+    cancelBtn.addEventListener("click", () => { conceptEditing = false; renderConceptGoal(); });
+    input.addEventListener("keydown", e => {
+      if (e.key === "Escape") { conceptEditing = false; renderConceptGoal(); }
+    });
+    form.addEventListener("submit", e => {
+      e.preventDefault();
+      const v = input.value.trim().slice(0, 60);
+      guideState.goal = v || guideState.goal;
+      saveGuideState();
+      conceptEditing = false;
+      renderConceptGoal();
+    });
+    form.append(input, saveBtn, cancelBtn);
+    wrap.appendChild(form);
+    input.focus();
+    input.select();
+  }
+}
+function renderConceptMilestone(assets) {
+  const wrap = $("concept-milestone");
+  const ms = assets != null ? nextMilestoneInfo(assets) : null;
+  if (!ms) { wrap.hidden = true; wrap.innerHTML = ""; return; }
+  wrap.hidden = false;
+  const pct = Math.max(0, Math.min(100, Math.round((1 - ms.ratio) * 100)));
+  wrap.innerHTML = "";
+  const line = document.createElement("div");
+  line.className = "milestone-line";
+  line.textContent = `いま${fmtYen(assets)} → 次は${ms.label}(${pct}%)`;
+  const meter = document.createElement("div");
+  meter.className = "meter";
+  const span = document.createElement("span");
+  span.style.width = pct + "%";
+  meter.appendChild(span);
+  wrap.append(line, meter);
+}
 function renderConcept() {
   const assets = getCurrentAssetsOrNull(readCompass());
   $("concept-assets").textContent = assets != null ? ` ・ いま ${fmtYen(assets)}` : "";
+  renderConceptGoal();
+  renderConceptMilestone(assets);
 }
 function renderRisingImage() {
   $("rising-week-label").textContent = weekKeyLabel(guideState.image.weekKey);
@@ -663,7 +793,7 @@ function renderBets() {
   scoreEl.textContent = formatScore(score);
   const scoreLabelEl = document.createElement("div");
   scoreLabelEl.className = "score-label";
-  scoreLabelEl.textContent = week.settled ? "確定スコア" : "暫定スコア(チェックで即反映)";
+  scoreLabelEl.textContent = week.settled ? "確定スコア" : "今週の暫定スコア(チェックで即反映)";
   scoreWrap.append(scoreEl, scoreLabelEl);
 
   const body = $("bets-body");
@@ -687,9 +817,12 @@ function renderBets() {
       cb.disabled = week.settled;
       cb.setAttribute("aria-label", `賭け「${item.text}」をクリア`);
       cb.addEventListener("change", () => {
+        const prevScore = computeWeekScore(week);
         item.cleared = cb.checked;
         saveGuideState();
+        const delta = computeWeekScore(week) - prevScore;
         renderAll();
+        if (delta !== 0) showScorePop(delta);
       });
       const tagChip = document.createElement("span");
       tagChip.className = "tg-chip";
@@ -898,7 +1031,7 @@ function svgEl(NS, name, attrs) {
 
 function buildMainChartData() {
   const series = buildWeekSeriesAll();
-  if (series.length < 2) return null;
+  if (series.length < 1) return null; // 初週(今週のみ)でも暫定スコアを先端点として描画する
   const weekKeys = series.map(s => s.weekKey);
   const cumulative = series.map(s => s.cumulative);
   const feelCumulative = series.map(s => s.feelCumulative);
@@ -924,11 +1057,11 @@ function renderMainChart() {
     $("line-chart-sub").textContent = "";
     const empty = document.createElement("div");
     empty.className = "chart-empty";
-    empty.textContent = "線は2週目から現れる。まず今週を生き延びろ。";
+    empty.textContent = "賭けを置くと、ここに線が現れる。";
     host.appendChild(empty);
     tableWrap.innerHTML = ""; tableWrap.hidden = true;
     tagDetail.hidden = true;
-    wrap.setAttribute("aria-label", "上昇線チャート。データが2週分たまると表示されます。");
+    wrap.setAttribute("aria-label", "上昇線チャート。データがまだありません。");
     return;
   }
   tagDetail.hidden = false;
