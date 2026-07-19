@@ -1,7 +1,7 @@
 /* 100億コンパス — Service Worker
    オフラインキャッシュ + 毎日リマインド通知(Periodic Background Sync) */
 "use strict";
-const CACHE = "hyakuoku-compass-v3";
+const CACHE = "hyakuoku-compass-v5";
 const ASSETS = ["./", "./index.html", "./guide.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 // guide.html(機能A)が renderAll のたびに書き込む通知ペイロードのキャッシュ名。
 const NOTIFY_CACHE = "michibiki-notify";
